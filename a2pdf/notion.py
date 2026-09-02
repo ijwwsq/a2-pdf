@@ -37,8 +37,12 @@ class NotionError(RuntimeError):
 
 
 def is_notion(url: str) -> bool:
-    host = urllib.parse.urlparse(url if "//" in url else "//" + url).netloc
-    return host.endswith("notion.so") or host.endswith("notion.site")
+    """notion.so, notion.site, app.notion.com — всё это страницы Notion."""
+    host = urllib.parse.urlparse(url if "//" in url else "//" + url).netloc.lower()
+    host = host.split("@")[-1].split(":")[0]
+    return (host == "notion.so" or host.endswith((".notion.so", ".notion.site",
+                                                  ".notion.com"))
+            or host in ("notion.site", "notion.com"))
 
 
 def page_id(url: str) -> str:

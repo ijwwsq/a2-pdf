@@ -17,6 +17,9 @@ HEADINGS = {"h1": "h1", "h2": "h2", "h3": "h3",
 SKIP = {"script", "style", "noscript", "svg", "head", "nav", "aside",
         "iframe", "form", "button", "select", "template"}
 BLOCK_END = {"p", "div", "section", "article", "figcaption"}
+# у этих тегов нет закрывающего — иначе счётчик пропуска никогда не сойдётся
+VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link",
+        "meta", "param", "source", "track", "wbr"}
 
 
 class HtmlBlocks(HTMLParser):
@@ -48,7 +51,8 @@ class HtmlBlocks(HTMLParser):
     # --- разбор ------------------------------------------------------------
     def handle_starttag(self, tag, attrs):
         if self._skip_depth or tag in SKIP:
-            self._skip_depth += 1
+            if tag not in VOID:
+                self._skip_depth += 1
             return
         attrs = dict(attrs)
         if tag in INLINE:
@@ -77,7 +81,8 @@ class HtmlBlocks(HTMLParser):
 
     def handle_endtag(self, tag):
         if self._skip_depth:
-            self._skip_depth -= 1
+            if tag not in VOID:
+                self._skip_depth -= 1
             return
         if tag in INLINE:
             self._text.append(INLINE[tag][1])
@@ -156,7 +161,8 @@ class _Subtree(HTMLParser):
             self._depth = 1
             return
         if self._depth:
-            self._depth += 1
+            if tag not in VOID:
+                self._depth += 1
             self.out.append(self.get_starttag_text() or f"<{tag}>")
 
     def handle_startendtag(self, tag, attrs):
@@ -165,6 +171,8 @@ class _Subtree(HTMLParser):
 
     def handle_endtag(self, tag):
         if not self._depth:
+            return
+        if tag in VOID:
             return
         self._depth -= 1
         if self._depth:

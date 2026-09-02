@@ -123,7 +123,7 @@ def _convert(source: dict, overrides: dict, chrome: str) -> tuple[pathlib.Path, 
     if notion.is_notion(url):
         blocks, front = notion.load(url)
     else:
-        blocks, front = fetch(url, chrome=chrome)
+        blocks, front = fetch(url)
     front.update(overrides)
     stem = _safe_stem(str(front.get("title") or "document"))
     core.render_pdf(blocks, front, out_path, chrome=chrome, name=stem)
