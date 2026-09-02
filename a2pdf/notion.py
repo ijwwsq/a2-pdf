@@ -4,8 +4,8 @@
 
 * с токеном интеграции (`NOTION_TOKEN`) — официальный API, работает и с
   закрытыми страницами, которыми поделились с интеграцией;
-* без токена — публичный эндпоинт Notion, который используют опубликованные
-  страницы (Share → Publish to web).
+* без токена — публичный эндпоинт Notion; страница должна быть открыта по ссылке
+  (Share → General access → Anyone on the web with link).
 
 Блоки Notion превращаются в те же блоки документа, что markdown и docx.
 """
@@ -116,6 +116,19 @@ def _rich_v1(items: list | None) -> str:
     return "".join(out).strip()
 
 
+MERMAID_START = ("flowchart", "graph ", "sequencediagram", "classdiagram",
+                 "statediagram", "erdiagram", "journey", "gantt", "pie",
+                 "mindmap", "timeline", "gitgraph", "quadrantchart", "xychart")
+
+
+def _code_block(language: str, text: str) -> tuple:
+    """Код на mermaid показываем схемой, остальное — обычным блоком кода."""
+    head = text.lstrip().lower()
+    if (language or "").lower() == "mermaid" or head.startswith(MERMAID_START):
+        return ("mermaid", text)
+    return ("code", language or "", text)
+
+
 def _image_url(block_id: str, source: str) -> str:
     """Картинки Notion отдаются через прокси с подписью."""
     if not source:
@@ -142,8 +155,8 @@ def _load_public(pid: str) -> dict:
         except urllib.error.HTTPError as exc:
             if exc.code in (401, 403, 404):
                 raise NotionError(
-                    "Страница закрыта. Откройте доступ в Notion "
-                    "(Share → Publish to web) или задайте NOTION_TOKEN")
+                    "Страница закрыта. В Notion: Share → General access → "
+                    "Anyone on the web with link. Либо задайте NOTION_TOKEN")
             raise NotionError(f"Notion ответил {exc.code}")
         for key, record in chunk.get("recordMap", {}).get("block", {}).items():
             value = record.get("value") or {}
@@ -200,8 +213,9 @@ def _walk_public(pid: str, records: dict, blocks: list, seen: set,
             if child_text:
                 blocks.append(("p", child_text))
         elif child_kind == "code":
+            language = _rich_v3(child.get("properties", {}).get("language")).lower()
             if child_text:
-                blocks.append(("code", "", child_text))
+                blocks.append(_code_block(language, child_text))
         elif child_kind == "divider":
             blocks.append(("hr",))
         elif child_kind == "image":
@@ -298,7 +312,7 @@ def _walk_official(block_id: str, token: str, blocks: list, depth: int = 0) -> N
                     blocks.append(("p", text))
             elif kind == "code":
                 if text:
-                    blocks.append(("code", payload.get("language", ""), text))
+                    blocks.append(_code_block(payload.get("language", ""), text))
             elif kind == "divider":
                 blocks.append(("hr",))
             elif kind in ("quote", "callout"):

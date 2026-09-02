@@ -76,9 +76,10 @@ curl -X POST http://localhost:8000/convert -F "url=https://www.notion.so/..." -o
 ### Ссылки
 
 Notion читается через его API — подходят адреса `notion.so`, `notion.site`
-и `app.notion.com`. Опубликованная страница (Share → Publish to web) работает
-без настройки; для закрытой заведите internal integration, передайте сервису
-`NOTION_TOKEN` и добавьте интеграцию к странице через Share.
+и `app.notion.com`. Страница должна быть открыта по ссылке: Share → General
+access → **Anyone on the web with link**. Для закрытых страниц заведите internal
+integration, передайте сервису `NOTION_TOKEN` и добавьте интеграцию к странице
+через Share.
 
 Обычные страницы и ссылки на `.md` берутся простым HTTP-запросом. Браузер при
 этом не запускается вообще, поэтому страницы, где текст подгружают скрипты,

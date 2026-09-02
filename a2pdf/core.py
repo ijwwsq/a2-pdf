@@ -467,7 +467,7 @@ ol>li::before{content:counter(ol,decimal-leading-zero);position:absolute;left:0;
          text-transform:uppercase;color:var(--n400);margin-bottom:.8mm}
 pre.code{background:var(--n50);border:.25mm solid var(--n200);
          border-left:.9mm solid var(--blue);border-radius:1.4mm;padding:4mm 5mm;
-         margin:0 0 4mm;break-inside:avoid}
+         margin:0 0 4mm;break-inside:auto}
 pre.code code{font-family:var(--mono);font-size:8.4pt;line-height:1.55;background:none;
               border:0;padding:0;color:var(--n900);white-space:pre-wrap;
               word-break:break-word}

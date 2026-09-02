@@ -6,188 +6,300 @@
 <title>A2DATA · PDF</title>
 <link rel="stylesheet" href="/fonts.css">
 <style>
+/* Палитра, типографика, радиусы и тени — по брендбуку A2DATA */
 :root{
   --navy:#0B2660; --navy-900:#06173B; --navy-50:#F2F5FA; --navy-100:#E3EAF4;
-  --blue:#1FA8FC; --blue-700:#1289D5; --blue-50:#F1F8FF;
-  --amber:#FF9F1C;
-  --n0:#fff; --n50:#F7F8FA; --n100:#EFF1F4; --n200:#E1E4EA;
-  --n400:#9CA3AF; --n500:#6B7280; --n700:#374151; --n900:#111722;
-  --font:'Inter','Segoe UI',system-ui,sans-serif;
-  --mono:'JetBrains Mono',Consolas,monospace;
+  --blue:#1FA8FC; --blue-700:#1289D5; --blue-100:#E1F2FF; --blue-50:#F1F8FF;
+  --amber:#FF9F1C; --amber-700:#B86A06; --amber-50:#FFF8EC;
+  --n0:#FFFFFF; --n50:#F7F8FA; --n100:#EFF1F4; --n200:#E1E4EA;
+  --n400:#9CA3AF; --n500:#6B7280; --n700:#374151; --n800:#212934; --n900:#111722;
+  --r-md:8px; --r-lg:12px; --r-xl:16px;
+  --sh-sm:0 1px 2px rgba(11,38,96,.06);
+  --sh-md:0 4px 12px rgba(11,38,96,.08);
+  --sh-lg:0 12px 28px rgba(11,38,96,.12);
+  --font:'Inter','Helvetica Neue',Arial,sans-serif;
+  --mono:'JetBrains Mono','SF Mono',Consolas,monospace;
 }
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:var(--font);background:var(--n50);color:var(--n700);line-height:1.5;
-     min-height:100vh;display:flex;flex-direction:column;font-size:14px}
+body{font-family:var(--font);font-size:14.5px;line-height:1.55;color:var(--n700);
+     background:var(--n50);min-height:100vh;display:flex;flex-direction:column;
+     -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+svg{stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;
+    stroke-linejoin:round}
 
-header{background:var(--navy);color:#fff;padding:14px 28px;display:flex;
-       align-items:center;justify-content:space-between}
-.wordmark{font-weight:800;font-size:17px;letter-spacing:-.6px}
+header{background:var(--navy);color:#fff;padding:16px 28px;display:flex;
+       align-items:center;justify-content:space-between;
+       border-bottom:3px solid var(--amber);flex:none}
+/* вордмарк как в брендбуке: A2 и DATA — единый блок, DATA цветом бренда */
+.wordmark{font-weight:800;font-size:19px;letter-spacing:-.9px;line-height:1;color:#fff}
 .wordmark i{font-style:normal;color:var(--blue)}
-header span{font-family:var(--mono);font-size:11px;letter-spacing:1.6px;color:#7E9AD0}
+.eyebrow{font-family:var(--mono);font-size:10.5px;font-weight:500;letter-spacing:1.6px;
+         text-transform:uppercase;color:#86A2D4}
 
-main{flex:1;width:100%;max-width:680px;margin:0 auto;padding:32px 20px 56px}
+.layout{flex:1;display:grid;grid-template-columns:minmax(380px,470px) 1fr;
+        gap:24px;align-items:start;padding:24px 28px 40px;max-width:1440px;
+        width:100%;margin:0 auto}
 
-.tabs{display:flex;gap:2px;background:var(--n100);padding:3px;border-radius:9px;
-      margin-bottom:18px;width:fit-content}
-.tabs button{border:0;background:none;font:600 13px var(--font);color:var(--n500);
-             padding:7px 16px;border-radius:7px;cursor:pointer}
-.tabs button.on{background:var(--n0);color:var(--navy)}
+/* ---------- левая колонка ---------- */
+.panel{background:var(--n0);border:1px solid var(--n200);border-radius:var(--r-xl);
+       box-shadow:var(--sh-sm);padding:18px}
+.panel + .panel{margin-top:14px}
+.panel h2{font-size:11px;font-weight:600;letter-spacing:1.4px;text-transform:uppercase;
+          color:var(--n400);margin-bottom:12px}
+
+.tabs{display:flex;gap:2px;background:var(--n100);padding:3px;border-radius:var(--r-md);
+      margin-bottom:14px}
+.tabs button{flex:1;display:flex;align-items:center;justify-content:center;gap:7px;
+  border:0;background:none;font:600 13.5px var(--font);color:var(--n500);padding:8px 10px;
+  border-radius:6px;cursor:pointer;transition:background .15s,color .15s}
+.tabs button:hover{color:var(--n800)}
+.tabs button.on{background:var(--n0);color:var(--navy);box-shadow:var(--sh-sm)}
+.tabs svg{width:15px;height:15px}
+.panes{min-height:196px}
 .pane{display:none}
 .pane.on{display:block}
 
-.drop{display:block;border:1px dashed var(--n200);border-radius:10px;background:var(--n0);
-      padding:30px 20px;text-align:center;cursor:pointer}
+.drop{display:block;border:1.5px dashed var(--n200);border-radius:var(--r-lg);
+      background:var(--n50);padding:30px 18px;text-align:center;cursor:pointer;
+      transition:border-color .15s,background .15s}
 .drop:hover,.drop.over{border-color:var(--blue);background:var(--blue-50)}
+.drop .ico{width:40px;height:40px;margin:0 auto 12px;border-radius:var(--r-md);
+  background:var(--blue-50);color:var(--blue-700);display:flex;align-items:center;
+  justify-content:center}
+.drop .ico svg{width:20px;height:20px}
 .drop b{display:block;font-weight:600;color:var(--n900);font-size:14px}
-.drop small{color:var(--n400);font-size:12.5px}
+.drop small{color:var(--n500);font-size:12.5px}
 .drop input{display:none}
 
-.file{display:none;gap:10px;align-items:flex-start;background:var(--n0);
-      border:1px solid var(--n200);border-radius:10px;padding:12px 14px;margin-top:10px}
+.file{display:none;gap:10px;align-items:flex-start;background:var(--n50);
+      border:1px solid var(--n200);border-radius:var(--r-lg);padding:12px 14px;
+      margin-top:10px}
 .file.show{display:flex}
-.file .badge{font:600 11px var(--mono);color:var(--blue-700);background:var(--blue-50);
-             border:1px solid #BFE3FF;border-radius:4px;padding:2px 7px;flex:none}
-.file .name{flex:1;min-width:0;font-weight:600;color:var(--n900);
-            overflow-wrap:anywhere;word-break:break-word}
+.file .badge{font:600 10.5px var(--mono);color:var(--blue-700);background:var(--blue-50);
+  border:1px solid var(--blue-100);border-radius:5px;padding:3px 7px;flex:none}
+.file .name{flex:1;min-width:0;font-weight:600;color:var(--n900);font-size:13.5px;
+            overflow-wrap:anywhere}
 .file button{background:none;border:0;color:var(--n400);cursor:pointer;font-size:18px}
+.file button:hover{color:var(--n900)}
 
-textarea.md{width:100%;min-height:250px;font:12.5px/1.6 var(--mono);color:var(--n900);
-            border:1px solid var(--n200);border-radius:10px;padding:14px 16px;
-            background:var(--n0);resize:vertical}
+textarea.md{width:100%;height:196px;font:12.5px/1.6 var(--mono);color:var(--n900);
+  border:1px solid var(--n200);border-radius:var(--r-lg);padding:14px 16px;
+  background:var(--n50);resize:vertical}
 input[type=text],input[type=file],select,textarea{width:100%;font:14px var(--font);
-  color:var(--n900);border:1px solid var(--n200);border-radius:8px;padding:9px 11px;
-  background:var(--n0)}
-input:focus,textarea:focus,select:focus{outline:none;border-color:var(--blue)}
-.hint{font-size:12.5px;color:var(--n400);margin-top:8px}
-.hint code{font-family:var(--mono);font-size:11.5px;color:var(--navy)}
+  color:var(--n900);border:1px solid var(--n200);border-radius:var(--r-md);
+  padding:9px 11px;background:var(--n0)}
+input:focus,textarea:focus,select:focus{outline:none;border-color:var(--blue);
+  box-shadow:0 0 0 3px var(--blue-50)}
+.hint{font-size:12.5px;color:var(--n500);margin-top:10px}
+.hint code{font-family:var(--mono);font-size:11.5px;color:var(--navy);
+  background:var(--navy-50);border:1px solid var(--navy-100);border-radius:4px;
+  padding:1px 5px}
 
-details{margin-top:14px;border:1px solid var(--n200);border-radius:10px;background:var(--n0)}
-summary{cursor:pointer;padding:12px 16px;font-weight:600;color:var(--navy);font-size:13.5px;
-        list-style:none}
-summary::-webkit-details-marker{display:none}
-summary::before{content:"+ ";font-family:var(--mono);color:var(--blue)}
-details[open] summary::before{content:"− "}
-.fields{padding:2px 16px 18px;display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.f{display:flex;flex-direction:column;gap:4px}
+.tpls{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.tpl{border:1px solid var(--n200);background:var(--n0);border-radius:var(--r-lg);
+     padding:8px;cursor:pointer;text-align:left;display:block;
+     transition:border-color .15s,box-shadow .15s}
+.tpl:hover{border-color:var(--blue);box-shadow:var(--sh-sm)}
+.tpl.on{border-color:var(--navy);box-shadow:0 0 0 1px var(--navy)}
+/* миниатюра повторяет обложку: янтарный штрих, заголовок, строка реквизитов */
+.thumb{display:block;position:relative;height:56px;border-radius:6px;margin-bottom:8px;
+       overflow:hidden;background:var(--navy)}
+.thumb .ph{position:absolute;inset:0;background-size:cover;background-position:center;
+           filter:grayscale(1) brightness(1.35)}
+.thumb .tint{position:absolute;inset:0;
+             background:linear-gradient(155deg,rgba(11,38,96,.78),rgba(6,23,59,.95))}
+.thumb i,.thumb u{position:absolute;display:block;border-radius:1px}
+.thumb i{left:8px;top:8px;width:12px;height:2px;background:var(--amber)}
+.thumb u{left:8px;background:rgba(255,255,255,.9)}
+.thumb u.t{bottom:20px;width:56%;height:5px}
+.thumb u.s{bottom:12px;width:34%;height:3px;background:rgba(255,255,255,.45)}
+.thumb.light{background:var(--n0);box-shadow:inset 0 0 0 1px var(--n200)}
+.thumb.light u{background:var(--navy)}
+.thumb.light u.s{background:var(--n400)}
+.tpl b{display:block;font-size:12.5px;font-weight:600;color:var(--n900);line-height:1.3}
+.tpl .note{display:block;font-size:11px;color:var(--n500)}
+
+.fields{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.f{display:flex;flex-direction:column;gap:5px}
 .f.wide{grid-column:1 / -1}
-.fields label{font:600 11px var(--font);letter-spacing:1px;text-transform:uppercase;
-              color:var(--n400)}
-.fields textarea{font:12px var(--mono);min-height:66px;resize:vertical}
-.checks{grid-column:1 / -1;display:flex;gap:20px}
+.fields label{font-size:12.5px;font-weight:500;color:var(--n500)}
+.fields textarea{font:12px var(--mono);min-height:64px;resize:vertical}
+.checks{grid-column:1 / -1;display:flex;gap:18px}
 .checks label{display:flex;align-items:center;gap:7px;font-size:13.5px;color:var(--n700);
-              cursor:pointer;text-transform:none;letter-spacing:0;font-weight:500}
+              cursor:pointer;font-weight:500}
+.more{margin-top:12px;border-top:1px solid var(--n100);padding-top:12px}
+.more[hidden]{display:none}
+.toggle{background:none;border:0;font:600 12.5px var(--font);color:var(--blue-700);
+        cursor:pointer;padding:0;margin-top:12px}
 
-.go{margin-top:18px;display:flex;align-items:center;gap:14px}
-button.primary{background:var(--navy);color:#fff;border:0;border-radius:9px;
-               padding:12px 24px;font:600 14px var(--font);cursor:pointer}
+.go{display:flex;align-items:center;gap:12px;margin-top:14px}
+button.primary{background:var(--navy);color:#fff;border:0;border-radius:var(--r-md);
+  padding:12px 24px;font:600 14.5px var(--font);cursor:pointer;transition:background .15s}
 button.primary:hover{background:var(--navy-900)}
 button.primary:disabled{background:var(--n400);cursor:default}
-.status{font-size:13px;color:var(--n500)}
+.kbd{font-family:var(--mono);font-size:10.5px;color:var(--n400)}
+.status{font-size:13px;color:var(--n500);flex:1;min-width:0}
 .status.err{color:#B42318}
 .status.ok{color:var(--blue-700);font-weight:600}
-.spinner{width:14px;height:14px;border:2px solid var(--navy-100);border-top-color:var(--blue);
-         border-radius:50%;display:inline-block;vertical-align:-2px;margin-right:7px;
-         animation:spin .7s linear infinite}
+.spinner{width:14px;height:14px;border:2px solid var(--navy-100);
+  border-top-color:var(--blue);border-radius:50%;display:inline-block;
+  vertical-align:-2px;margin-right:7px;animation:spin .7s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 
-.ref{margin-top:26px;font-size:12.5px;color:var(--n500)}
-.ref h2{font:600 11px var(--font);letter-spacing:1.2px;text-transform:uppercase;
-        color:var(--n400);margin-bottom:10px}
-.ref dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px}
-.ref dt{font-family:var(--mono);font-size:11.5px;color:var(--navy)}
-footer{padding:16px 28px;border-top:1px solid var(--n200);background:var(--n0);
-       font:11px var(--mono);color:var(--n400);display:flex;justify-content:space-between}
-@media (max-width:600px){.fields{grid-template-columns:1fr}main{padding:22px 14px 40px}}
+/* ---------- правая колонка: предпросмотр ---------- */
+.preview{position:sticky;top:24px;background:var(--n0);border:1px solid var(--n200);
+         border-radius:var(--r-xl);box-shadow:var(--sh-md);overflow:hidden;
+         display:flex;flex-direction:column;height:calc(100vh - 128px);min-height:520px}
+.preview .bar{display:flex;align-items:center;gap:10px;padding:12px 16px;
+              border-bottom:1px solid var(--n200);flex:none}
+.preview .nm{flex:1;min-width:0;font-weight:600;color:var(--n900);font-size:13.5px;
+             overflow-wrap:anywhere}
+.preview .nm.empty{color:var(--n400);font-weight:500}
+.preview .size{font-family:var(--mono);font-size:11px;color:var(--n400);flex:none}
+.preview .bar a,.preview .bar button{font:600 12.5px var(--font);border-radius:var(--r-md);
+  padding:7px 14px;cursor:pointer;text-decoration:none;border:1px solid var(--n200);
+  color:var(--n700);background:var(--n0)}
+.preview .bar button:hover{border-color:var(--blue);color:var(--navy)}
+.preview .bar a.dl{background:var(--navy);border-color:var(--navy);color:#fff}
+.preview .bar [hidden]{display:none}
+.preview iframe{flex:1;width:100%;border:0;background:var(--n100);display:none}
+.preview iframe.show{display:block}
+.empty-state{flex:1;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:12px;color:var(--n400);background:var(--n50);padding:32px;
+  text-align:center}
+.empty-state svg{width:34px;height:34px;stroke-width:1.4}
+.empty-state b{font-size:14px;font-weight:600;color:var(--n500)}
+.empty-state span{font-size:12.5px;max-width:280px}
+
+footer{padding:14px 28px;border-top:1px solid var(--n200);background:var(--n0);
+       font-family:var(--mono);font-size:10.5px;letter-spacing:.5px;color:var(--n400);
+       display:flex;justify-content:space-between;flex:none}
+
+@media (max-width:1080px){
+  .layout{grid-template-columns:1fr;padding:20px 18px 36px}
+  .preview{position:static;height:auto;min-height:0}
+  .preview iframe.show{height:70vh}
+}
+@media (max-width:560px){
+  .tpls{grid-template-columns:repeat(2,1fr)}
+  .fields{grid-template-columns:1fr}
+}
 </style>
 </head>
 <body>
 <header>
   <div class="wordmark">A2<i>DATA</i></div>
-  <span>PDF</span>
+  <div class="eyebrow">Документы</div>
 </header>
 
-<main>
+<div class="layout">
   <form id="form">
-    <div class="tabs">
-      <button type="button" class="on" data-pane="pane-file">Файл</button>
-      <button type="button" data-pane="pane-text">Текст</button>
-      <button type="button" data-pane="pane-url">Ссылка</button>
-    </div>
-
-    <div class="pane on" id="pane-file">
-      <label class="drop" id="drop" for="file">
-        <b>Перетащите файл или нажмите, чтобы выбрать</b>
-        <small>.md, .markdown, .docx — до 20 МБ</small>
-        <input type="file" id="file" accept=".md,.markdown,.docx">
-      </label>
-      <div class="file" id="chosen">
-        <span class="badge" id="ext">MD</span>
-        <span class="name" id="fname"></span>
-        <button type="button" id="clear" title="Убрать">&times;</button>
+    <div class="panel">
+      <h2>Источник</h2>
+      <div class="tabs">
+        <button type="button" class="on" data-pane="pane-file">
+          <svg viewBox="0 0 24 24"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/></svg>
+          Файл</button>
+        <button type="button" data-pane="pane-text">
+          <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+          Текст</button>
+        <button type="button" data-pane="pane-url">
+          <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>
+          Ссылка</button>
       </div>
-    </div>
 
-    <div class="pane" id="pane-text">
-      <textarea class="md" id="mdtext" spellcheck="false" placeholder="# Заголовок
+      <div class="panes">
+        <div class="pane on" id="pane-file">
+          <label class="drop" id="drop" for="file">
+            <div class="ico"><svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L8 8m4-4 4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg></div>
+            <b>Перетащите файл сюда</b>
+            <small>.md, .markdown, .docx — до 20 МБ</small>
+            <input type="file" id="file" accept=".md,.markdown,.docx">
+          </label>
+          <div class="file" id="chosen">
+            <span class="badge" id="ext">MD</span>
+            <span class="name" id="fname"></span>
+            <button type="button" id="clear" title="Убрать">&times;</button>
+          </div>
+        </div>
 
-Markdown: списки, таблицы, код, блоки ```mermaid."></textarea>
-    </div>
+        <div class="pane" id="pane-text">
+          <textarea class="md" id="mdtext" spellcheck="false" placeholder="# Заголовок
 
-    <div class="pane" id="pane-url">
-      <input type="text" id="url" placeholder="https://app.notion.com/p/… или адрес страницы">
-      <div class="hint">Страница Notion должна быть опубликована (Share → Publish to web),
-        иначе сервису нужен <code>NOTION_TOKEN</code>. Обычные страницы и ссылки на .md
-        тоже работают.</div>
-    </div>
+Списки, таблицы, код и блоки ```mermaid — всё соберётся в PDF."></textarea>
+        </div>
 
-    <details>
-      <summary>Обложка и колонтитулы</summary>
-      <div class="fields">
-        <div class="f"><label for="title">Заголовок</label>
-          <input type="text" id="title" placeholder="из документа"></div>
-        <div class="f"><label for="kicker">Надпись сверху</label>
-          <input type="text" id="kicker" placeholder="Коммерческое предложение"></div>
-        <div class="f wide"><label for="subtitle">Подзаголовок</label>
-          <input type="text" id="subtitle"></div>
-        <div class="f"><label for="index">Номер</label>
-          <input type="text" id="index" placeholder="01"></div>
-        <div class="f"><label for="confidential">Плашка</label>
-          <input type="text" id="confidential" placeholder="Конфиденциально"></div>
-        <div class="f"><label for="header">Колонтитул справа</label>
-          <input type="text" id="header"></div>
-        <div class="f"><label for="footer">Колонтитул слева</label>
-          <input type="text" id="footer"></div>
-        <div class="f"><label for="style">Фон обложки</label>
-          <select id="style"><option value="dark">Синий</option>
-            <option value="light">Белый</option></select></div>
-        <div class="f"><label for="photo">Фото на обложку</label>
-          <input type="file" id="photo" accept=".jpg,.jpeg,.png,.webp"></div>
-        <div class="f wide"><label for="meta">Реквизиты внизу обложки</label>
-          <textarea id="meta" spellcheck="false" placeholder="Клиент=ООО Пример&#10;Срок=10 недель"></textarea></div>
-        <div class="checks">
-          <label><input type="checkbox" id="cover" checked> Обложка</label>
-          <label><input type="checkbox" id="numbered" checked> Нумеровать разделы</label>
+        <div class="pane" id="pane-url">
+          <input type="text" id="url" placeholder="https://app.notion.com/p/…">
+          <div class="hint">В Notion нужен доступ по ссылке: Share → General access →
+            <b>Anyone on the web with link</b>. Для закрытых страниц сервису нужен
+            <code>NOTION_TOKEN</code>. Обычные страницы и ссылки на .md тоже работают.</div>
         </div>
       </div>
-    </details>
+    </div>
 
-    <div class="go">
-      <button class="primary" id="submit" type="submit" disabled>Собрать PDF</button>
-      <span class="status" id="status"></span>
+    <div class="panel">
+      <h2>Шаблон</h2>
+      <div class="tpls" id="templates"></div>
+
+      <button type="button" class="toggle" id="toggle">Настроить обложку</button>
+
+      <div class="more" id="more" hidden>
+        <div class="fields">
+          <div class="f wide"><label for="title">Заголовок</label>
+            <input type="text" id="title" placeholder="из документа"></div>
+          <div class="f"><label for="kicker">Надпись над заголовком</label>
+            <input type="text" id="kicker"></div>
+          <div class="f"><label for="index">Номер</label>
+            <input type="text" id="index" placeholder="01"></div>
+          <div class="f wide"><label for="subtitle">Подзаголовок</label>
+            <input type="text" id="subtitle"></div>
+          <div class="f"><label for="style">Фон обложки</label>
+            <select id="style"><option value="dark">Синий</option>
+              <option value="light">Белый</option></select></div>
+          <div class="f"><label for="background">Фото на обложке</label>
+            <select id="background"><option value="">Без фото</option></select></div>
+          <div class="f wide"><label for="photo">Своё фото</label>
+            <input type="file" id="photo" accept=".jpg,.jpeg,.png,.webp"></div>
+          <div class="f"><label for="confidential">Плашка</label>
+            <input type="text" id="confidential" placeholder="Конфиденциально"></div>
+          <div class="f"><label for="footer">Колонтитул слева</label>
+            <input type="text" id="footer" placeholder="a2data.ai"></div>
+          <div class="f wide"><label for="header">Колонтитул справа</label>
+            <input type="text" id="header" placeholder="название документа"></div>
+          <div class="f wide"><label for="meta">Реквизиты внизу обложки</label>
+            <textarea id="meta" spellcheck="false" placeholder="Клиент=ООО Пример&#10;Срок=10 недель"></textarea></div>
+          <div class="checks">
+            <label><input type="checkbox" id="cover" checked> Обложка</label>
+            <label><input type="checkbox" id="numbered" checked> Нумеровать разделы</label>
+          </div>
+        </div>
+      </div>
+
+      <div class="go">
+        <button class="primary" id="submit" type="submit" disabled>Собрать PDF</button>
+        <span class="kbd">Ctrl+Enter</span>
+        <span class="status" id="status"></span>
+      </div>
     </div>
   </form>
 
-  <div class="ref">
-    <h2>Разметка</h2>
-    <dl>
-      <dt>--- … ---</dt><dd>front matter в начале md задаёт те же поля, что форма</dd>
-      <dt>```mermaid</dt><dd>схема в фирменной палитре</dd>
-      <dt>&lt;!--PART:Часть 2|Заголовок--&gt;</dt><dd>разделитель между частями</dd>
-      <dt>&lt;!--CAP:подпись--&gt;</dt><dd>подпись под схемой</dd>
-      <dt>&lt;!--NUMBERING:off--&gt;</dt><dd>дальше разделы без номеров</dd>
-    </dl>
+  <div class="preview">
+    <div class="bar">
+      <span class="nm empty" id="rname">Предпросмотр</span>
+      <span class="size" id="rsize"></span>
+      <button type="button" id="ropen" hidden>Открыть</button>
+      <a class="dl" id="rdl" download hidden>Скачать</a>
+    </div>
+    <div class="empty-state" id="empty">
+      <svg viewBox="0 0 24 24"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/><path d="M9 13h6M9 17h4"/></svg>
+      <b>Здесь появится документ</b>
+      <span>Выберите источник слева и нажмите «Собрать PDF» — результат откроется
+        в этом окне.</span>
+    </div>
+    <iframe id="rframe" title="Предпросмотр"></iframe>
   </div>
-</main>
+</div>
 
 <footer><span>A2DATA</span><span>a2data.ai</span></footer>
 
@@ -195,14 +307,101 @@ Markdown: списки, таблицы, код, блоки ```mermaid."></textar
 const $ = (id) => document.getElementById(id);
 const fileInput = $('file'), drop = $('drop'), chosen = $('chosen'), status = $('status');
 let tab = 'pane-file';
+let lastUrl = null;
 
-document.querySelectorAll('.tabs button').forEach(b => b.addEventListener('click', () => {
-  tab = b.dataset.pane;
-  document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b));
-  document.querySelectorAll('.pane').forEach(p => p.classList.toggle('on', p.id === tab));
+/* ---------- источник ---------- */
+function switchTab(pane) {
+  tab = pane;
+  document.querySelectorAll('.tabs button').forEach(x =>
+    x.classList.toggle('on', x.dataset.pane === pane));
+  document.querySelectorAll('.pane').forEach(p => p.classList.toggle('on', p.id === pane));
   refresh();
-}));
+}
+document.querySelectorAll('.tabs button').forEach(b =>
+  b.addEventListener('click', () => switchTab(b.dataset.pane)));
 
+/* ---------- шаблоны ---------- */
+const TEMPLATES = [
+  {id:'plain',    name:'Без шаблона', note:'как в файле', style:'dark'},
+  {id:'offer',    name:'Коммерческое', note:'фото города', style:'dark',
+   kicker:'Коммерческое предложение', background:'city',
+   meta:'Клиент=\nСрок=\nДокумент=1.0'},
+  {id:'report',   name:'Отчёт', note:'светлая', style:'light',
+   kicker:'Отчёт', meta:'Период=\nАвтор='},
+  {id:'internal', name:'Внутренний', note:'с плашкой', style:'dark',
+   kicker:'Внутренний документ', confidential:'Конфиденциально'},
+  {id:'task',     name:'Тестовое', note:'для кандидатов', style:'dark',
+   kicker:'Тестовое задание', background:'abstract', meta:'Роль=\nСрок сдачи='},
+  {id:'concept',  name:'Концепция', note:'фото космоса', style:'dark',
+   kicker:'Концепция', background:'space'}
+];
+let template = 'plain';
+
+function drawTemplates() {
+  $('templates').innerHTML = TEMPLATES.map(t => {
+    const photo = t.background
+      ? `<span class="ph" style="background-image:url(/covers/${t.background}.jpg)"></span>
+         <span class="tint"></span>` : '';
+    return `<button type="button" class="tpl${t.id === template ? ' on' : ''}" data-tpl="${t.id}">
+      <span class="thumb${t.style === 'light' ? ' light' : ''}">${photo}
+        <i></i><u class="t"></u><u class="s"></u></span>
+      <b>${t.name}</b><span class="note">${t.note}</span></button>`;
+  }).join('');
+  document.querySelectorAll('.tpl').forEach(b =>
+    b.addEventListener('click', () => applyTemplate(b.dataset.tpl)));
+}
+
+function applyTemplate(id) {
+  template = id;
+  const t = TEMPLATES.find(x => x.id === id) || {};
+  document.querySelectorAll('.tpl').forEach(b =>
+    b.classList.toggle('on', b.dataset.tpl === id));
+  if (id === 'plain') {
+    $('kicker').value = ''; $('confidential').value = ''; $('background').value = '';
+  } else {
+    $('kicker').value = t.kicker || '';
+    $('confidential').value = t.confidential || '';
+    $('style').value = t.style || 'dark';
+    $('background').value = t.background || '';
+    if (t.meta && !$('meta').value.trim()) $('meta').value = t.meta;
+  }
+  save();
+}
+
+fetch('/covers').then(r => r.json()).then(data => {
+  (data.covers || []).forEach(name => {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name.charAt(0).toUpperCase() + name.slice(1);
+    $('background').appendChild(opt);
+  });
+  restore();
+}).catch(() => restore());
+
+$('toggle').addEventListener('click', () => {
+  const more = $('more');
+  more.hidden = !more.hidden;
+  $('toggle').textContent = more.hidden ? 'Настроить обложку' : 'Свернуть настройки';
+});
+
+/* ---------- память настроек ---------- */
+const REMEMBER = ['footer', 'header', 'style', 'background'];
+function save() {
+  try {
+    const data = {};
+    REMEMBER.forEach(k => data[k] = $(k).value);
+    localStorage.setItem('a2pdf', JSON.stringify(data));
+  } catch (e) {}
+}
+function restore() {
+  try {
+    const data = JSON.parse(localStorage.getItem('a2pdf') || '{}');
+    REMEMBER.forEach(k => { if (data[k]) $(k).value = data[k]; });
+  } catch (e) {}
+}
+REMEMBER.forEach(k => $(k).addEventListener('change', save));
+
+/* ---------- готовность ---------- */
 function ready() {
   if (tab === 'pane-file') return !!fileInput.files[0];
   if (tab === 'pane-text') return $('mdtext').value.trim().length > 0;
@@ -223,16 +422,36 @@ function setFile(f) {
   status.textContent = ''; status.className = 'status';
   refresh();
 }
-['dragenter','dragover'].forEach(e => drop.addEventListener(e, ev => {
+['dragenter','dragover'].forEach(e => document.addEventListener(e, ev => {
   ev.preventDefault(); drop.classList.add('over'); }));
-['dragleave','drop'].forEach(e => drop.addEventListener(e, ev => {
+['dragleave','drop'].forEach(e => document.addEventListener(e, ev => {
   ev.preventDefault(); drop.classList.remove('over'); }));
-drop.addEventListener('drop', ev => setFile(ev.dataTransfer.files[0]));
+document.addEventListener('drop', ev => {
+  const f = ev.dataTransfer && ev.dataTransfer.files[0];
+  if (f) { switchTab('pane-file'); setFile(f); }
+});
 fileInput.addEventListener('change', () => setFile(fileInput.files[0]));
 $('clear').addEventListener('click', () => {
   fileInput.value = ''; chosen.classList.remove('show'); refresh();
 });
 
+document.addEventListener('paste', (ev) => {
+  const text = ev.clipboardData ? ev.clipboardData.getData('text') : '';
+  if (tab !== 'pane-url' && /^https?:\/\/\S+$/.test((text || '').trim())
+      && document.activeElement === document.body) {
+    switchTab('pane-url');
+    $('url').value = text.trim();
+    refresh();
+  }
+});
+document.addEventListener('keydown', (ev) => {
+  if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter') {
+    ev.preventDefault();
+    $('form').requestSubmit();
+  }
+});
+
+/* ---------- сборка ---------- */
 $('form').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   if (!ready()) return;
@@ -243,6 +462,7 @@ $('form').addEventListener('submit', async (ev) => {
   ['title','subtitle','kicker','index','header','footer','confidential','meta']
     .forEach(k => { const v = $(k).value.trim(); if (v) body.append(k, v); });
   body.append('style', $('style').value);
+  if ($('background').value) body.append('background', $('background').value);
   if ($('photo').files[0]) body.append('photo', $('photo').files[0]);
   if (!$('cover').checked) body.append('cover', '0');
   if (!$('numbered').checked) body.append('numbered', '0');
@@ -264,11 +484,19 @@ $('form').addEventListener('submit', async (ev) => {
     const name = (tab === 'pane-file' && fileInput.files[0])
       ? fileInput.files[0].name.replace(/\.(md|markdown|docx)$/i, '') + '.pdf'
       : (guess || ($('title').value.trim() || 'document') + '.pdf');
-    const link = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = link; a.download = name; a.click();
-    setTimeout(() => URL.revokeObjectURL(link), 4000);
-    status.textContent = 'Готово: ' + name;
+
+    if (lastUrl) URL.revokeObjectURL(lastUrl);
+    lastUrl = URL.createObjectURL(blob);
+    $('rname').textContent = name;
+    $('rname').classList.remove('empty');
+    $('rsize').textContent = Math.round(blob.size / 1024) + ' КБ';
+    $('rdl').href = lastUrl; $('rdl').download = name; $('rdl').hidden = false;
+    $('ropen').hidden = false;
+    $('ropen').onclick = () => window.open(lastUrl, '_blank');
+    $('empty').style.display = 'none';
+    $('rframe').src = lastUrl + '#view=FitH';
+    $('rframe').classList.add('show');
+    status.textContent = 'Готово';
     status.className = 'status ok';
   } catch (e) {
     fail(e.message);
@@ -276,6 +504,8 @@ $('form').addEventListener('submit', async (ev) => {
     refresh();
   }
 });
+
+drawTemplates();
 refresh();
 </script>
 </body>

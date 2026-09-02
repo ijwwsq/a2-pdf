@@ -11,14 +11,20 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import contextlib
+import ipaddress
 import logging
 import os
 import pathlib
 import re
+import socket
 import tempfile
+import time
+import urllib.parse
 import uuid
+from collections import deque
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from starlette.background import BackgroundTask
 
@@ -31,29 +37,92 @@ log = logging.getLogger("a2pdf")
 MAX_BYTES = int(os.environ.get("A2PDF_MAX_UPLOAD", 20 * 1024 * 1024))
 WORKERS = int(os.environ.get("A2PDF_WORKERS", 2))
 TIMEOUT = int(os.environ.get("A2PDF_TIMEOUT", 180))
+RATE_LIMIT = int(os.environ.get("A2PDF_RATE_LIMIT", 60))   # запросов с адреса в минуту
 ALLOWED = {".md", ".markdown", ".docx"}
 PHOTO_TYPES = {".jpg", ".jpeg", ".png", ".webp"}
+COVERS = core.ASSETS / "covers"          # встроенные фоны обложки
 
 STATIC = pathlib.Path(__file__).resolve().parent / "static"
 OUT_DIR = pathlib.Path(os.environ.get("A2PDF_OUT") or tempfile.gettempdir()) / "a2pdf"
 
-app = FastAPI(title="A2DATA PDF", docs_url="/api", redoc_url=None)
-_pool = concurrent.futures.ThreadPoolExecutor(max_workers=WORKERS)
-_slots = asyncio.Semaphore(WORKERS)
-
-
-@app.on_event("startup")
-def _warmup() -> None:
+@contextlib.asynccontextmanager
+async def lifespan(application: FastAPI):
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     core.ensure_assets(quiet=True)
-    app.state.chrome = core.find_chrome()
-    log.info("chrome: %s, воркеров: %s", app.state.chrome, WORKERS)
+    application.state.chrome = core.find_chrome()
+    log.info("chrome: %s, воркеров: %s", application.state.chrome, WORKERS)
+    for stale in OUT_DIR.glob("*"):  # мусор от прошлого запуска
+        stale.unlink(missing_ok=True)
+    yield
+    _pool.shutdown(wait=False, cancel_futures=True)
+
+
+app = FastAPI(title="A2DATA PDF", version=__import__("a2pdf").__version__,
+              docs_url="/api", redoc_url=None, lifespan=lifespan)
+_pool = concurrent.futures.ThreadPoolExecutor(max_workers=WORKERS)
+_slots = asyncio.Semaphore(WORKERS)
+_hits: dict[str, deque] = {}
+
+
+def _rate_ok(client: str) -> bool:
+    """Простое ограничение частоты: RATE_LIMIT запросов с адреса в минуту."""
+    now = time.monotonic()
+    hits = _hits.setdefault(client, deque())
+    while hits and now - hits[0] > 60:
+        hits.popleft()
+    if len(hits) >= RATE_LIMIT:
+        return False
+    hits.append(now)
+    if len(_hits) > 5000:  # не копим адреса бесконечно
+        for key in [k for k, v in _hits.items() if not v]:
+            _hits.pop(key, None)
+    return True
+
+
+def _check_url(raw: str) -> str:
+    """Пускаем только http(s) на публичные адреса — сервис не должен ходить
+    во внутреннюю сеть по чужой ссылке."""
+    url = raw if "//" in raw else "https://" + raw
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("Ссылка должна начинаться с http или https")
+    host = parsed.hostname or ""
+    if not host:
+        raise ValueError("В ссылке нет адреса")
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        raise ValueError("Адрес не найден")
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast):
+            raise ValueError("Ссылки на внутренние адреса не принимаются")
+    return url
 
 
 @app.get("/healthz")
 def healthz() -> JSONResponse:
-    return JSONResponse({"status": "ok", "chrome": getattr(app.state, "chrome", None),
-                         "notion_token": bool(os.environ.get("NOTION_TOKEN"))})
+    return JSONResponse({"status": "ok", "version": app.version,
+                         "chrome": getattr(app.state, "chrome", None),
+                         "notion_token": bool(os.environ.get("NOTION_TOKEN")),
+                         "workers": WORKERS})
+
+
+@app.get("/covers")
+def covers() -> JSONResponse:
+    """Список встроенных фонов обложки."""
+    names = sorted(p.stem for p in COVERS.glob("*.jpg")) if COVERS.is_dir() else []
+    return JSONResponse({"covers": names})
+
+
+@app.get("/covers/{name}.jpg")
+def cover_image(name: str) -> FileResponse:
+    path = COVERS / f"{pathlib.Path(name).stem}.jpg"
+    if not path.is_file():
+        raise HTTPException(404, "Такого фона нет")
+    return FileResponse(path, media_type="image/jpeg",
+                        headers={"Cache-Control": "public, max-age=604800"})
 
 
 @app.get("/fonts.css")
@@ -132,6 +201,7 @@ def _convert(source: dict, overrides: dict, chrome: str) -> tuple[pathlib.Path, 
 
 @app.post("/convert")
 async def convert(
+    request: Request,
     file: UploadFile | None = File(None),
     photo: UploadFile | None = File(None),
     text: str | None = Form(None),
@@ -145,9 +215,14 @@ async def convert(
     confidential: str | None = Form(None),
     meta: str | None = Form(None),
     style: str | None = Form(None),
+    background: str | None = Form(None),
     cover: str | None = Form(None),
     numbered: str | None = Form(None),
 ):
+    client = request.client.host if request.client else "unknown"
+    if not _rate_ok(client):
+        raise HTTPException(429, "Слишком много запросов, попробуйте через минуту")
+
     source: dict
     if file is not None and file.filename:
         suffix = pathlib.Path(file.filename).suffix.lower()
@@ -166,7 +241,10 @@ async def convert(
             raise HTTPException(413, "Слишком много текста")
         source = {"kind": "text", "text": body, "stem": "document"}
     elif url and url.strip():
-        source = {"kind": "url", "url": _text(url).strip()}
+        try:
+            source = {"kind": "url", "url": _check_url(_text(url).strip())}
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
     else:
         raise HTTPException(400, "Нужен файл, текст или ссылка")
 
@@ -180,6 +258,11 @@ async def convert(
     if numbered in ("0", "false", "off"):
         overrides["numbered"] = "false"
 
+    if background:
+        builtin = COVERS / f"{pathlib.Path(background).stem}.jpg"
+        if builtin.is_file():
+            overrides["photo"] = str(builtin)
+
     photo_path: pathlib.Path | None = None
     if photo is not None and photo.filename:
         if pathlib.Path(photo.filename).suffix.lower() not in PHOTO_TYPES:
@@ -191,6 +274,7 @@ async def convert(
         photo_path.write_bytes(blob)
         overrides["photo"] = str(photo_path)
 
+    started = time.monotonic()
     loop = asyncio.get_running_loop()
     async with _slots:
         try:
@@ -209,6 +293,8 @@ async def convert(
             if photo_path:
                 photo_path.unlink(missing_ok=True)
 
+    log.info("%s -> %s.pdf, %.1f c, %d KB", source["kind"], stem,
+             time.monotonic() - started, out_path.stat().st_size // 1024)
     return FileResponse(
         out_path, media_type="application/pdf", filename=f"{stem}.pdf",
         background=BackgroundTask(out_path.unlink, missing_ok=True))
