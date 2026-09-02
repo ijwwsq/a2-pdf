@@ -9,6 +9,8 @@ services:
       A2PDF_WORKERS: "2"          # сколько документов собираем одновременно
       A2PDF_TIMEOUT: "120"        # секунд на один документ
       A2PDF_MAX_UPLOAD: "20971520"
+      # для закрытых страниц Notion: токен internal integration
+      NOTION_TOKEN: "${NOTION_TOKEN:-}"
     restart: unless-stopped
     tmpfs:
       - /tmp

@@ -31,6 +31,19 @@ h1{font-size:30px;font-weight:700;color:var(--navy);letter-spacing:-.8px;line-he
 .lead{color:var(--n500);margin:10px 0 28px;font-size:15px}
 .lead b{color:var(--n900);font-weight:600}
 
+.tabs{display:flex;gap:4px;background:var(--n100);padding:4px;border-radius:12px;
+      margin-bottom:16px;width:fit-content}
+.tabs button{border:0;background:none;font-family:var(--font);font-size:13.5px;
+  font-weight:600;color:var(--n500);padding:8px 18px;border-radius:9px;cursor:pointer}
+.tabs button.on{background:var(--n0);color:var(--navy);box-shadow:0 1px 3px rgba(11,38,96,.10)}
+.pane{display:none}
+.pane.on{display:block}
+.md-input{width:100%;min-height:260px;font-family:var(--mono);font-size:12.5px;
+  line-height:1.6;color:var(--n900);border:1px solid var(--n200);border-radius:12px;
+  padding:16px 18px;background:var(--n0);resize:vertical}
+.url-row{display:flex;gap:10px;align-items:center}
+.url-row input{flex:1}
+.url-note{font-size:12.5px;color:var(--n400);margin-top:10px}
 .drop{display:block;border:2px dashed var(--n200);border-radius:14px;background:var(--n0);padding:38px 24px;
       text-align:center;cursor:pointer;transition:border-color .15s,background .15s}
 .drop:hover,.drop.over{border-color:var(--blue);background:var(--blue-50)}
@@ -46,8 +59,8 @@ h1{font-size:30px;font-weight:700;color:var(--navy);letter-spacing:-.8px;line-he
 .file.show{display:flex}
 .file .badge{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--blue-700);
              background:var(--blue-50);border:1px solid #BFE3FF;border-radius:5px;padding:3px 8px}
-.file .name{font-weight:600;color:var(--n900);font-size:14px;flex:1;overflow:hidden;
-            text-overflow:ellipsis;white-space:nowrap}
+.file .name{font-weight:600;color:var(--n900);font-size:14px;flex:1;min-width:0;
+            overflow-wrap:anywhere;word-break:break-word;line-height:1.35}
 .file button{background:none;border:0;color:var(--n400);cursor:pointer;font-size:20px;line-height:1}
 .file button:hover{color:var(--n900)}
 
@@ -62,7 +75,7 @@ details[open] summary::before{content:"−"}
 .f.wide{grid-column:1 / -1}
 .fields label{font-size:11px;letter-spacing:1.2px;text-transform:uppercase;
               color:var(--n400);font-weight:600}
-input[type=text],textarea{font-family:var(--font);font-size:14px;color:var(--n900);
+input[type=text],input[type=file],select,textarea{font-family:var(--font);font-size:14px;color:var(--n900);
   border:1px solid var(--n200);border-radius:8px;padding:9px 11px;background:var(--n0);width:100%}
 textarea{font-family:var(--mono);font-size:12.5px;resize:vertical;min-height:74px}
 input:focus,textarea:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px var(--blue-50)}
@@ -103,11 +116,19 @@ footer{padding:20px 32px;border-top:1px solid var(--n200);font-family:var(--mono
 </header>
 
 <main>
-  <h1>Фирменный PDF из markdown или Word</h1>
-  <p class="lead">Загрузите <b>.md</b> или <b>.docx</b> — вернём PDF в оформлении компании:
-     обложка, колонтитулы с нумерацией, диаграммы mermaid, встроенные шрифты.</p>
+  <h1>Фирменный PDF за один шаг</h1>
+  <p class="lead">Файл <b>.md</b> или <b>.docx</b>, вставленный markdown или ссылка
+     на <b>Notion</b> — вернём PDF в оформлении компании: обложка, колонтитулы
+     с нумерацией, диаграммы mermaid, встроенные шрифты.</p>
 
   <form id="form">
+    <div class="tabs" role="tablist">
+      <button type="button" class="on" data-pane="pane-file">Файл</button>
+      <button type="button" data-pane="pane-text">Текст</button>
+      <button type="button" data-pane="pane-url">Ссылка</button>
+    </div>
+
+    <div class="pane on" id="pane-file">
     <label class="drop" id="drop" for="file">
       <div class="ico"><svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L8 8m4-4 4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg></div>
       <div class="big">Перетащите файл сюда или нажмите, чтобы выбрать</div>
@@ -119,6 +140,23 @@ footer{padding:20px 32px;border-top:1px solid var(--n200);font-family:var(--mono
       <span class="badge" id="ext">MD</span>
       <span class="name" id="fname"></span>
       <button type="button" id="clear" title="Убрать">&times;</button>
+    </div>
+    </div>
+
+    <div class="pane" id="pane-text">
+      <textarea class="md-input" id="mdtext" placeholder="# Заголовок
+
+Вставьте сюда markdown. Работают списки, таблицы, код и блоки ```mermaid."></textarea>
+    </div>
+
+    <div class="pane" id="pane-url">
+      <div class="url-row">
+        <input type="text" id="url" placeholder="https://www.notion.so/... или ссылка на страницу">
+      </div>
+      <div class="url-note">Страница Notion должна быть опубликована
+        (Share → Publish to web) либо сервису нужен токен интеграции
+        в переменной <code>NOTION_TOKEN</code>. Обычные веб-страницы и ссылки
+        на .md тоже подходят.</div>
     </div>
 
     <details>
@@ -142,6 +180,14 @@ footer{padding:20px 32px;border-top:1px solid var(--n200);font-family:var(--mono
         <div class="f wide"><label for="meta">Таблица на обложке</label>
           <textarea id="meta" name="meta" placeholder="Роль=Python Backend&#10;Таймбокс=4 часа&#10;Документ=1.0 / 2026"></textarea>
           <span class="hint">По строке на поле, в формате <code>Ключ=Значение</code>.</span></div>
+        <div class="f"><label for="style">Обложка</label>
+          <select id="style">
+            <option value="dark">Синяя</option>
+            <option value="light">Светлая</option>
+          </select></div>
+        <div class="f"><label for="photo">Фото на обложку</label>
+          <input type="file" id="photo" accept=".jpg,.jpeg,.png,.webp">
+          <span class="hint">Ляжет фоном под синий слой.</span></div>
         <div class="checks">
           <label><input type="checkbox" id="cover" checked> Обложка</label>
           <label><input type="checkbox" id="numbered" checked> Нумеровать разделы</label>
@@ -166,6 +212,9 @@ footer{padding:20px 32px;border-top:1px solid var(--n200);font-family:var(--mono
           <code>&lt;!--CAP:подпись под схемой--&gt;</code>,
           <code>&lt;!--NUMBERING:off--&gt;</code>.</li>
       <li>Из .docx переносятся заголовки, списки, таблицы, цитаты и картинки.</li>
+      <li>Страница Notion должна быть опубликована (Share → Publish to web); для
+          закрытых страниц задайте сервису <code>NOTION_TOKEN</code>.</li>
+      <li>Фото на обложке ложится под синий слой — работает и с обычными снимками.</li>
     </ul>
   </div>
 </main>
@@ -175,17 +224,37 @@ footer{padding:20px 32px;border-top:1px solid var(--n200);font-family:var(--mono
 <script>
 const $ = (id) => document.getElementById(id);
 const fileInput = $('file'), drop = $('drop'), chosen = $('chosen'), status = $('status');
+let tab = 'pane-file';
+
+function setTab(pane) {
+  tab = pane;
+  document.querySelectorAll('.tabs button').forEach(b =>
+    b.classList.toggle('on', b.dataset.pane === pane));
+  document.querySelectorAll('.pane').forEach(p =>
+    p.classList.toggle('on', p.id === pane));
+  refresh();
+}
+document.querySelectorAll('.tabs button').forEach(b =>
+  b.addEventListener('click', () => setTab(b.dataset.pane)));
+
+function ready() {
+  if (tab === 'pane-file') return !!fileInput.files[0];
+  if (tab === 'pane-text') return $('mdtext').value.trim().length > 0;
+  return $('url').value.trim().length > 0;
+}
+function refresh() { $('submit').disabled = !ready(); }
+$('mdtext').addEventListener('input', refresh);
+$('url').addEventListener('input', refresh);
 
 function setFile(f) {
   if (!f) return;
-  const ok = /\.(md|markdown|docx)$/i.test(f.name);
-  if (!ok) { fail('Нужен файл .md или .docx'); return; }
+  if (!/\.(md|markdown|docx)$/i.test(f.name)) { fail('Нужен файл .md или .docx'); return; }
   const dt = new DataTransfer(); dt.items.add(f); fileInput.files = dt.files;
   $('fname').textContent = f.name;
   $('ext').textContent = f.name.split('.').pop().toUpperCase();
   chosen.classList.add('show');
-  $('submit').disabled = false;
   status.textContent = ''; status.className = 'status';
+  refresh();
 }
 function fail(msg) { status.textContent = msg; status.className = 'status err'; }
 
@@ -196,22 +265,35 @@ function fail(msg) { status.textContent = msg; status.className = 'status err'; 
 drop.addEventListener('drop', ev => setFile(ev.dataTransfer.files[0]));
 fileInput.addEventListener('change', () => setFile(fileInput.files[0]));
 $('clear').addEventListener('click', () => {
-  fileInput.value = ''; chosen.classList.remove('show'); $('submit').disabled = true;
+  fileInput.value = ''; chosen.classList.remove('show'); refresh();
 });
+
+function outName() {
+  if (tab === 'pane-file' && fileInput.files[0])
+    return fileInput.files[0].name.replace(/\.(md|markdown|docx)$/i, '') + '.pdf';
+  const title = $('title').value.trim();
+  return (title || 'document') + '.pdf';
+}
 
 $('form').addEventListener('submit', async (ev) => {
   ev.preventDefault();
-  if (!fileInput.files[0]) return;
+  if (!ready()) return;
   const body = new FormData();
-  body.append('file', fileInput.files[0]);
+  if (tab === 'pane-file') body.append('file', fileInput.files[0]);
+  else if (tab === 'pane-text') body.append('text', $('mdtext').value);
+  else body.append('url', $('url').value.trim());
+
   ['title','subtitle','kicker','index','header','footer','confidential','meta']
     .forEach(k => { const v = $(k).value.trim(); if (v) body.append(k, v); });
+  body.append('style', $('style').value);
+  if ($('photo').files[0]) body.append('photo', $('photo').files[0]);
   if (!$('cover').checked) body.append('cover', '0');
   if (!$('numbered').checked) body.append('numbered', '0');
 
   $('submit').disabled = true;
   status.className = 'status';
-  status.innerHTML = '<span class="spinner"></span>Собираю документ…';
+  status.innerHTML = '<span class="spinner"></span>' +
+    (tab === 'pane-url' ? 'Читаю страницу…' : 'Собираю документ…');
   try {
     const res = await fetch('/convert', { method: 'POST', body });
     if (!res.ok) {
@@ -220,19 +302,20 @@ $('form').addEventListener('submit', async (ev) => {
       throw new Error(msg);
     }
     const blob = await res.blob();
-    const name = fileInput.files[0].name.replace(/\.(md|markdown|docx)$/i, '') + '.pdf';
-    const url = URL.createObjectURL(blob);
+    const name = outName();
+    const link = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = name; a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    a.href = link; a.download = name; a.click();
+    setTimeout(() => URL.revokeObjectURL(link), 4000);
     status.textContent = 'Готово: ' + name;
     status.className = 'status ok';
   } catch (e) {
     fail(e.message);
   } finally {
-    $('submit').disabled = false;
+    refresh();
   }
 });
+refresh();
 </script>
 </body>
 </html>

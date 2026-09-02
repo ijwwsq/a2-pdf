@@ -42,8 +42,10 @@ import os
 import html
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import urllib.request
 
 import pymupdf
@@ -379,49 +381,60 @@ body{font-family:var(--font);color:var(--n700);font-variant-numeric:tabular-nums
 COVER_CSS = TOKENS + """
 @page{size:A4;margin:0}
 body{width:210mm;height:296.5mm;overflow:hidden}
-.cover{position:relative;width:210mm;height:296.5mm;background:var(--navy);
-       color:#fff;padding:22mm 20mm 18mm;display:flex;flex-direction:column;
-       justify-content:space-between;overflow:hidden}
-.cover::before{content:"";position:absolute;inset:0;
-  background-image:linear-gradient(rgba(255,255,255,.05) .3mm,transparent .3mm),
-                   linear-gradient(90deg,rgba(255,255,255,.05) .3mm,transparent .3mm);
-  background-size:14mm 14mm;background-position:20mm 22mm}
-.cover::after{content:"";position:absolute;top:-70mm;right:-70mm;width:190mm;
-  height:190mm;border-radius:50%;
-  background:radial-gradient(circle,rgba(31,168,252,.30) 0%,rgba(31,168,252,0) 65%)}
-.cover>*{position:relative}
-.edge{position:absolute;left:0;top:0;bottom:0;width:3mm;background:var(--amber);z-index:2}
-.top{display:flex;justify-content:space-between;align-items:flex-start;
-     padding-bottom:6mm;border-bottom:.25mm solid rgba(255,255,255,.14)}
-.wordmark{font-size:20pt;font-weight:800;letter-spacing:-1px;line-height:1}
+.cover{position:relative;width:210mm;height:296.5mm;padding:26mm 24mm 22mm;
+       display:flex;flex-direction:column;justify-content:space-between;overflow:hidden;
+       background:var(--navy);color:#fff;
+       --line:rgba(255,255,255,.20); --muted:#8FA6CE; --strong:#fff}
+/* мягкое свечение в углу, чтобы синий не был плоским */
+.cover::after{content:"";position:absolute;top:-80mm;right:-60mm;width:200mm;height:200mm;
+  border-radius:50%;
+  background:radial-gradient(circle,rgba(31,168,252,.34) 0,rgba(31,168,252,0) 62%)}
+
+/* обложка с фотографией: дуотон — осветлённый ч/б снимок под синим слоем */
+.cover.photo::after{display:none}
+
+/* светлый вариант */
+.cover.light{background:var(--n0);color:var(--navy);
+       --line:var(--n200); --muted:var(--n500); --strong:var(--navy)}
+.cover.light::after{display:none}
+
+.cover>*{position:relative;z-index:1}
+/* фоновые слои должны остаться абсолютными, поэтому селекторы точнее */
+.cover>.bg,.cover>.tint{position:absolute;inset:0;display:none;z-index:0}
+.cover.photo>.bg{display:block;background-image:var(--photo);background-size:cover;
+  background-position:center;filter:grayscale(1) brightness(1.45) contrast(.95)}
+.cover.photo>.tint{display:block;mix-blend-mode:multiply;
+  background:linear-gradient(155deg,rgba(11,38,96,.80) 0%,rgba(6,23,59,.95) 82%)}
+.cover>.mark{position:absolute;left:24mm;top:26mm;width:18mm;height:1mm;
+  background:var(--amber);z-index:2}
+
+.top{display:flex;justify-content:space-between;align-items:baseline;padding-top:8mm}
+.wordmark{font-size:17pt;font-weight:800;letter-spacing:-.8px;line-height:1;color:var(--strong)}
 .wordmark i{font-style:normal;color:var(--blue)}
-.top .role{font-family:var(--mono);font-size:7.6pt;letter-spacing:2.2px;
-           text-transform:uppercase;color:#7E9AD0;text-align:right;padding-top:3mm}
-.mid{position:relative;padding:6mm 0 10mm}
-.idx{position:absolute;right:-6mm;bottom:-2mm;font-size:158pt;font-weight:800;
-     line-height:.8;letter-spacing:-6px;color:transparent;
-     -webkit-text-stroke:.45mm rgba(31,168,252,.38)}
-.kick{display:flex;align-items:center;gap:4mm;margin-bottom:7mm}
-.kick .bar{width:14mm;height:1mm;background:var(--amber)}
-.kick .txt{font-family:var(--mono);font-size:8pt;letter-spacing:2.6px;
-           text-transform:uppercase;color:var(--blue)}
-h1{font-size:38pt;font-weight:700;letter-spacing:-1.8px;line-height:1.04;max-width:152mm}
-.sub{font-size:12.5pt;line-height:1.5;color:#BFD0E8;margin-top:6mm;max-width:118mm}
-.chip{display:inline-block;background:var(--amber);color:var(--navy);font-size:7.6pt;
-      font-weight:700;letter-spacing:1.6px;text-transform:uppercase;padding:2mm 4mm;
-      border-radius:1mm;margin-bottom:6mm}
-.bars{display:flex;align-items:flex-end;gap:1.3mm;height:13mm;margin-bottom:9mm}
-.bars i{display:block;width:1.8mm;background:rgba(31,168,252,.5);border-radius:.4mm}
-.bars i.hi{background:var(--amber)}
-.spec{display:grid;border-top:.25mm solid rgba(255,255,255,.22);padding-top:5mm}
-.spec div{padding-left:5mm;border-left:.25mm solid rgba(255,255,255,.14)}
-.spec div:first-child{padding-left:0;border-left:0}
-.spec .k{font-size:7pt;letter-spacing:1.6px;text-transform:uppercase;color:#7E9AD0}
-.spec .v{font-family:var(--mono);font-size:9.4pt;color:#fff;margin-top:1.5mm;
+.top .role{font-family:var(--mono);font-size:7.4pt;letter-spacing:2px;
+           text-transform:uppercase;color:var(--muted)}
+
+.mid{padding-bottom:6mm}
+.kick{font-family:var(--mono);font-size:8pt;letter-spacing:2.4px;text-transform:uppercase;
+      color:var(--blue);margin-bottom:8mm;display:flex;gap:3mm}
+.kick .num{color:var(--muted)}
+h1{font-size:34pt;font-weight:700;letter-spacing:-1.4px;line-height:1.08;max-width:152mm;
+   color:var(--strong);overflow-wrap:anywhere}
+.sub{font-size:12pt;line-height:1.5;color:var(--muted);margin-top:7mm;max-width:122mm;
+     font-weight:400}
+.chip{display:inline-block;border:.25mm solid var(--amber);color:var(--amber);
+      font-size:7.4pt;font-weight:600;letter-spacing:1.4px;text-transform:uppercase;
+      padding:1.6mm 3.4mm;border-radius:1mm;margin-bottom:7mm}
+.cover.light .chip{color:var(--amber-700)}
+
+.bottom{border-top:.25mm solid var(--line);padding-top:6mm}
+.spec{display:grid;gap:6mm}
+.spec .k{font-size:7pt;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted)}
+.spec .v{font-family:var(--mono);font-size:9.2pt;color:var(--strong);margin-top:1.4mm;
          white-space:nowrap}
-.foot{display:flex;justify-content:space-between;align-items:center;margin-top:7mm;
-      font-size:8pt;color:#7E9AD0;font-family:var(--mono);letter-spacing:.6px}
-.foot .site{color:#fff}
+.foot{display:flex;justify-content:space-between;margin-top:8mm;font-family:var(--mono);
+      font-size:7.6pt;letter-spacing:.5px;color:var(--muted)}
+.foot .site{color:var(--strong)}
 """
 
 BODY_CSS = TOKENS + """
@@ -461,6 +474,7 @@ pre.code code{font-family:var(--mono);font-size:8.4pt;line-height:1.55;backgroun
 table{width:100%;border-collapse:collapse;margin:0 0 4mm;font-size:9pt;break-inside:avoid}
 th{background:var(--navy);color:#fff;text-align:left;font-weight:600;padding:2.6mm 3mm;
    font-size:8.4pt}
+th strong,th code,th a{color:#fff;background:none;border:0}
 td{padding:2.4mm 3mm;border-bottom:.25mm solid var(--n200);vertical-align:top}
 tbody tr:nth-child(even) td{background:var(--n50)}
 .note{border-left:.9mm solid var(--amber);background:var(--amber-50);padding:3.5mm 5mm;
@@ -531,20 +545,21 @@ await mermaid.run();
 COVER_TPL = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><title>{title}</title>
 <style>{fonts}</style><style>{css}</style></head><body>
-<div class="cover">
-  <div class="edge"></div>
+<div class="cover {style}"{cover_style}>
+  <div class="bg"></div>
+  <div class="tint"></div>
+  <div class="mark"></div>
   <div class="top">
     <div class="wordmark">A2<i>DATA</i></div>
     <div class="role">{role}</div>
   </div>
   <div class="mid">
-    {index}{chip}
+    {chip}
     {kicker}
     <h1>{title_text}</h1>
     {subtitle}
   </div>
   <div class="bottom">
-    <div class="bars">{bars}</div>
     <div class="spec" style="grid-template-columns:repeat({cols},1fr)">{spec}</div>
     <div class="foot"><span>{foot_left}</span><span class="site">{site}</span></div>
   </div>
@@ -558,19 +573,6 @@ BODY_TPL = """<!doctype html>
 {mermaid}
 </body></html>
 """
-
-BAR_HEIGHTS = [22, 38, 30, 52, 44, 66, 48, 80, 58, 92, 70, 100, 62, 46, 74,
-               54, 34, 60, 42, 28, 50, 36, 24, 44, 30, 20, 40, 26]
-
-
-def bars_html() -> str:
-    return "".join(f'<i class="{"hi" if i == 11 else ""}" style="height:{h}%"></i>'
-                   for i, h in enumerate(BAR_HEIGHTS))
-
-
-# --------------------------------------------------------------------------- #
-# PDF
-# --------------------------------------------------------------------------- #
 
 MM = 72 / 25.4
 NAVY = (0x0B / 255, 0x26 / 255, 0x60 / 255)
@@ -588,13 +590,24 @@ def find_chrome() -> str:
 
 def print_pdf(html_path: pathlib.Path, pdf_path: pathlib.Path, chrome: str,
               wait_ms: int) -> None:
+    """Печатает HTML в PDF. Каждому запуску нужен свой профиль: иначе Chrome
+    передаёт работу уже запущенному инстансу и молча ничего не печатает."""
     url = "file:///" + str(html_path).replace("\\", "/")
-    subprocess.run(
-        [chrome, "--headless=new", "--disable-gpu", "--no-sandbox",
-         "--no-pdf-header-footer", "--print-to-pdf-no-header",
-         f"--print-to-pdf={pdf_path}", f"--virtual-time-budget={wait_ms}",
-         "--allow-file-access-from-files", url],
-        check=True, capture_output=True)
+    TMP.mkdir(parents=True, exist_ok=True)
+    profile = tempfile.mkdtemp(prefix="chrome-", dir=TMP)
+    try:
+        subprocess.run(
+            [chrome, "--headless=new", "--disable-gpu", "--no-sandbox",
+             "--no-first-run", "--no-default-browser-check",
+             f"--user-data-dir={profile}",
+             "--no-pdf-header-footer", "--print-to-pdf-no-header",
+             f"--print-to-pdf={pdf_path}", f"--virtual-time-budget={wait_ms}",
+             "--allow-file-access-from-files", url],
+            check=True, capture_output=True, timeout=max(60, wait_ms // 1000 + 45))
+        if not pdf_path.exists():
+            raise RuntimeError("Chrome не создал PDF")
+    finally:
+        shutil.rmtree(profile, ignore_errors=True)
 
 
 def stamp(doc: pymupdf.Document, header_right: str, footer_left: str,
@@ -646,6 +659,34 @@ def save(doc: pymupdf.Document, pdf_path: pathlib.Path) -> pathlib.Path:
 # --------------------------------------------------------------------------- #
 
 
+def _cover_class(front: dict) -> str:
+    classes = []
+    if str(front.get("style", "dark")).lower() == "light":
+        classes.append("light")
+    if front.get("photo"):
+        classes.append("photo")
+    return " ".join(classes)
+
+
+def _cover_bg(front: dict) -> str:
+    """Фото на обложке: локальный файл встраиваем, ссылку оставляем как есть."""
+    photo = str(front.get("photo") or "").strip()
+    if not photo:
+        return ""
+    src = embed_image(photo)
+    return f' style="--photo:url({src})"' if src else ""
+
+
+def _kicker(front: dict) -> str:
+    """Строка над заголовком: номер документа и надпись."""
+    parts = []
+    if front.get("index"):
+        parts.append(f'<span class="num">{html.escape(str(front["index"]))}</span>')
+    if front.get("kicker"):
+        parts.append(f'<span>{html.escape(str(front["kicker"]))}</span>')
+    return f'<div class="kick">{"".join(parts)}</div>' if parts else ""
+
+
 def render_pdf(blocks: list[tuple], front: dict, out_path: pathlib.Path,
                chrome: str | None = None, name: str = "document") -> pathlib.Path:
     """Собирает PDF из уже разобранных блоков и словаря настроек обложки."""
@@ -687,18 +728,15 @@ def render_pdf(blocks: list[tuple], front: dict, out_path: pathlib.Path,
         cover_html.write_text(COVER_TPL.format(
             title=html.escape(str(front["title"])), fonts=fonts_css, css=COVER_CSS,
             role=html.escape(str(front.get("role", COMPANY))),
-            index=(f'<div class="idx">{html.escape(str(front["index"]))}</div>'
-                   if front.get("index") else ""),
+
             chip=(f'<div class="chip">{html.escape(str(front["confidential"]))}</div>'
                   if front.get("confidential") else ""),
-            kicker=(f'<div class="kick"><span class="bar"></span>'
-                    f'<span class="txt">{html.escape(str(front["kicker"]))}</span></div>'
-                    if front.get("kicker") else '<div class="kick">'
-                    '<span class="bar"></span></div>'),
+            kicker=_kicker(front),
+            style=_cover_class(front), cover_style=_cover_bg(front),
             title_text=html.escape(str(front["title"])),
             subtitle=(f'<div class="sub">{html.escape(str(front["subtitle"]))}</div>'
                       if front.get("subtitle") else ""),
-            bars=bars_html(), cols=max(1, len(meta_items)) if meta_items else 1,
+            cols=max(1, len(meta_items)) if meta_items else 1,
             spec=spec,
             foot_left=html.escape(str(front.get("place", "Almaty, Kazakhstan"))),
             site=SITE), encoding="utf-8")
@@ -809,12 +847,16 @@ def main(argv: list[str] | None = None) -> None:
                     help="не нумеровать разделы")
     ap.add_argument("--append", action="append", default=[], type=pathlib.Path,
                     help="дописать в конец ещё один md")
+    ap.add_argument("--photo", help="фото на обложку: путь к файлу или ссылка")
+    ap.add_argument("--style", choices=("dark", "light"),
+                    help="цвет обложки: синяя (dark) или светлая")
     ap.add_argument("--no-mermaid", action="store_true",
                     help="не рисовать диаграммы mermaid")
     args = ap.parse_args(argv)
 
     overrides: dict = {}
-    for name in ("title", "subtitle", "kicker", "index", "footer", "header"):
+    for name in ("title", "subtitle", "kicker", "index", "footer", "header",
+                 "photo", "style"):
         if getattr(args, name):
             overrides[name] = getattr(args, name)
     if args.confidential:

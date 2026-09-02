@@ -1,14 +1,18 @@
-# a2pdf — фирменные PDF из markdown и Word
+# a2pdf — фирменные PDF из markdown, Word и Notion
 
-Сервис и CLI, которые превращают `.md` или `.docx` в PDF в оформлении A2DATA:
-обложка, колонтитулы с нумерацией страниц, диаграммы mermaid в фирменной
-палитре, встроенные шрифты Inter и JetBrains Mono.
+Сервис и CLI, которые превращают `.md`, `.docx`, вставленный markdown или
+ссылку на страницу Notion в PDF в оформлении A2DATA: обложка, колонтитулы
+с нумерацией страниц, диаграммы mermaid в фирменной палитре, встроенные
+шрифты Inter и JetBrains Mono.
 
 ```
 a2pdf/
   a2pdf/
     core.py          вёрстка и сборка PDF
     docx_reader.py   чтение .docx
+    html_reader.py   HTML в блоки документа
+    notion.py        импорт страниц Notion
+    fetch.py         загрузка обычных страниц и raw markdown
     web.py           HTTP-сервис (FastAPI)
     static/          веб-форма
     assets/          шрифты и mermaid
@@ -40,6 +44,7 @@ docker compose up -d --build
 | `A2PDF_CHROME` | автопоиск | путь к chromium или chrome |
 | `A2PDF_ASSETS` | `a2pdf/assets` | где лежат шрифты и mermaid |
 | `A2PDF_TMP`, `A2PDF_OUT` | системный temp | рабочие каталоги |
+| `NOTION_TOKEN` | — | токен интеграции Notion для закрытых страниц |
 
 Один воркер держит один процесс chromium, поэтому память растёт линейно:
 на 2 воркера достаточно 1 ГБ. Ставьте `A2PDF_WORKERS` по числу ядер, а перед
@@ -47,8 +52,9 @@ docker compose up -d --build
 
 ## Как пользоваться
 
-**Через браузер.** Перетащить файл, при необходимости раскрыть «Настройки
-обложки», нажать «Собрать PDF».
+**Через браузер.** Три вкладки: перетащить файл, вставить markdown текстом
+или дать ссылку. При необходимости раскрыть «Настройки обложки» и нажать
+«Собрать PDF».
 
 **Через API.**
 
@@ -56,9 +62,23 @@ docker compose up -d --build
 curl -X POST http://localhost:8000/convert -F "file=@doc.md" -F "kicker=Коммерческое предложение" -F "index=01" -F "meta=Клиент=ООО Пример;Срок=10 недель" -o doc.pdf
 ```
 
-Поля формы: `title`, `subtitle`, `kicker`, `index`, `header`, `footer`,
-`confidential`, `meta` (строки `Ключ=Значение` через перевод строки или `;`),
-`cover=0`, `numbered=0`. Все поля необязательные и перекрывают front matter.
+Источник задаётся одним из полей: `file`, `text` или `url`.
+
+```bash
+curl -X POST http://localhost:8000/convert -F "url=https://www.notion.so/..." -o doc.pdf
+```
+
+Остальные поля необязательные и перекрывают front matter: `title`, `subtitle`,
+`kicker`, `index`, `header`, `footer`, `confidential`, `meta`
+(строки `Ключ=Значение` через перевод строки или `;`), `style=light|dark`,
+`photo` (файл), `cover=0`, `numbered=0`.
+
+### Notion
+
+Ссылка на опубликованную страницу (Share → Publish to web) работает без
+настройки. Для закрытых страниц заведите internal integration в Notion,
+передайте сервису `NOTION_TOKEN` и добавьте интеграцию к странице через Share —
+тогда используется официальный API.
 
 **Локально, без сервиса.**
 
@@ -89,6 +109,15 @@ a2pdf.build_any(pathlib.Path("документ.docx"), pathlib.Path("out.pdf"),
 Из docx: заголовки, жирный и курсив, списки, таблицы, цитаты, картинки.
 Оформление Word игнорируется — документ пересобирается по брендбуку.
 
+Из Notion: заголовки, абзацы, списки, чек-листы, цитаты и колауты, код,
+таблицы, разделители, картинки и вложенные блоки.
+
+### Обложка
+
+По умолчанию синяя. `style: light` даёт светлый вариант, `photo` кладёт
+снимок фоном: он обесцвечивается и уходит под синий слой — получается дуотон
+в фирменном цвете.
+
 Front matter в начале md задаёт обложку:
 
 ```markdown
@@ -103,6 +132,8 @@ footer: Python Backend Developer · a2data.ai
 cover: true
 numbered: true
 mermaid: true
+style: dark
+photo: cover.jpg
 meta:
   Роль: Python Backend
   Таймбокс: 4 часа
