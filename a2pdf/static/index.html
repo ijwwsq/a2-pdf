@@ -127,10 +127,40 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--blue);
 .checks{grid-column:1 / -1;display:flex;gap:18px}
 .checks label{display:flex;align-items:center;gap:7px;font-size:13.5px;color:var(--n700);
               cursor:pointer;font-weight:500}
-.more{margin-top:12px;border-top:1px solid var(--n100);padding-top:12px}
+.more{margin-top:14px;border-top:1px solid var(--n100)}
 .more[hidden]{display:none}
 .toggle{background:none;border:0;font:600 12.5px var(--font);color:var(--blue-700);
-        cursor:pointer;padding:0;margin-top:12px}
+        cursor:pointer;padding:0;margin-top:14px;display:flex;align-items:center;gap:6px}
+.toggle::before{content:"+";font-family:var(--mono);font-weight:700}
+.toggle.open::before{content:"−"}
+
+.group{padding:14px 0;border-bottom:1px solid var(--n100)}
+.group.last{border-bottom:0;padding-bottom:2px}
+.group h3{font-size:10.5px;font-weight:600;letter-spacing:1.3px;text-transform:uppercase;
+          color:var(--n400);margin-bottom:10px}
+
+/* выбор фона обложки миниатюрами */
+.bgs{display:flex;gap:8px;flex-wrap:wrap}
+.bgs button{width:62px;padding:0;border:1px solid var(--n200);border-radius:var(--r-md);
+  background:var(--n0);cursor:pointer;overflow:hidden;transition:border-color .15s,
+  box-shadow .15s}
+.bgs button:hover{border-color:var(--blue)}
+.bgs button.on{border-color:var(--navy);box-shadow:0 0 0 1px var(--navy)}
+.bgs .mini{display:block;height:40px;position:relative;background:var(--navy)}
+.bgs .mini.light{background:var(--n50);box-shadow:inset 0 0 0 1px var(--n200)}
+.bgs .mini .ph{position:absolute;inset:0;background-size:cover;background-position:center;
+               filter:grayscale(1) brightness(1.35)}
+.bgs .mini .tint{position:absolute;inset:0;
+  background:linear-gradient(155deg,rgba(11,38,96,.75),rgba(6,23,59,.95))}
+.bgs em{display:block;font-style:normal;font-size:10.5px;color:var(--n500);
+        padding:4px 2px;text-align:center}
+.bgs button.on em{color:var(--navy);font-weight:600}
+
+.upload{display:inline-flex;align-items:center;gap:7px;margin-top:10px;
+  border:1px solid var(--n200);border-radius:var(--r-md);padding:8px 14px;
+  font:500 13px var(--font);color:var(--n700);cursor:pointer;background:var(--n0)}
+.upload:hover{border-color:var(--blue);color:var(--navy)}
+.upload-name{font-size:12px;color:var(--n500);margin-left:10px}
 
 .go{display:flex;align-items:center;gap:12px;margin-top:14px}
 button.primary{background:var(--navy);color:#fff;border:0;border-radius:var(--r-md);
@@ -242,35 +272,56 @@ footer{padding:14px 28px;border-top:1px solid var(--n200);background:var(--n0);
       <h2>Шаблон</h2>
       <div class="tpls" id="templates"></div>
 
-      <button type="button" class="toggle" id="toggle">Настроить обложку</button>
+      <button type="button" class="toggle" id="toggle">Оформление документа</button>
 
       <div class="more" id="more" hidden>
-        <div class="fields">
-          <div class="f wide"><label for="title">Заголовок</label>
-            <input type="text" id="title" placeholder="из документа"></div>
-          <div class="f"><label for="kicker">Надпись над заголовком</label>
-            <input type="text" id="kicker"></div>
-          <div class="f"><label for="index">Номер</label>
-            <input type="text" id="index" placeholder="01"></div>
-          <div class="f wide"><label for="subtitle">Подзаголовок</label>
-            <input type="text" id="subtitle"></div>
-          <div class="f"><label for="style">Фон обложки</label>
-            <select id="style"><option value="dark">Синий</option>
-              <option value="light">Белый</option></select></div>
-          <div class="f"><label for="background">Фото на обложке</label>
-            <select id="background"><option value="">Без фото</option></select></div>
-          <div class="f wide"><label for="photo">Своё фото</label>
-            <input type="file" id="photo" accept=".jpg,.jpeg,.png,.webp"></div>
-          <div class="f"><label for="confidential">Плашка</label>
-            <input type="text" id="confidential" placeholder="Конфиденциально"></div>
-          <div class="f"><label for="footer">Колонтитул слева</label>
-            <input type="text" id="footer" placeholder="a2data.ai"></div>
-          <div class="f wide"><label for="header">Колонтитул справа</label>
-            <input type="text" id="header" placeholder="название документа"></div>
-          <div class="f wide"><label for="meta">Реквизиты внизу обложки</label>
-            <textarea id="meta" spellcheck="false" placeholder="Клиент=ООО Пример&#10;Срок=10 недель"></textarea></div>
+        <div class="group">
+          <h3>Обложка</h3>
+          <div class="fields">
+            <div class="f wide"><label for="title">Заголовок</label>
+              <input type="text" id="title" placeholder="из документа"></div>
+            <div class="f"><label for="kicker">Надпись над заголовком</label>
+              <input type="text" id="kicker" placeholder="Коммерческое предложение"></div>
+            <div class="f"><label for="index">Номер</label>
+              <input type="text" id="index" placeholder="01"></div>
+            <div class="f wide"><label for="subtitle">Подзаголовок</label>
+              <input type="text" id="subtitle"></div>
+            <div class="f wide"><label for="confidential">Плашка</label>
+              <input type="text" id="confidential" placeholder="Конфиденциально"></div>
+          </div>
+        </div>
+
+        <div class="group">
+          <h3>Фон обложки</h3>
+          <input type="hidden" id="style" value="dark">
+          <input type="hidden" id="background" value="">
+          <div class="bgs" id="bgs"></div>
+          <label class="upload" for="photo">
+            <svg viewBox="0 0 24 24" width="15" height="15"><path d="M12 16V4m0 0L8 8m4-4 4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+            Своё фото</label>
+          <input type="file" id="photo" accept=".jpg,.jpeg,.png,.webp" hidden>
+          <span class="upload-name" id="photoname"></span>
+        </div>
+
+        <div class="group">
+          <h3>Реквизиты внизу обложки</h3>
+          <textarea id="meta" spellcheck="false" placeholder="Клиент=ООО Пример&#10;Срок=10 недель"></textarea>
+        </div>
+
+        <div class="group">
+          <h3>Колонтитулы</h3>
+          <div class="fields">
+            <div class="f"><label for="footer">Слева внизу</label>
+              <input type="text" id="footer" placeholder="a2data.ai"></div>
+            <div class="f"><label for="header">Справа вверху</label>
+              <input type="text" id="header" placeholder="название документа"></div>
+          </div>
+        </div>
+
+        <div class="group last">
+          <h3>Структура</h3>
           <div class="checks">
-            <label><input type="checkbox" id="cover" checked> Обложка</label>
+            <label><input type="checkbox" id="cover" checked> Титульная страница</label>
             <label><input type="checkbox" id="numbered" checked> Нумеровать разделы</label>
           </div>
         </div>
@@ -358,6 +409,7 @@ function applyTemplate(id) {
     b.classList.toggle('on', b.dataset.tpl === id));
   if (id === 'plain') {
     $('kicker').value = ''; $('confidential').value = ''; $('background').value = '';
+    $('style').value = 'dark';
   } else {
     $('kicker').value = t.kicker || '';
     $('confidential').value = t.confidential || '';
@@ -365,23 +417,47 @@ function applyTemplate(id) {
     $('background').value = t.background || '';
     if (t.meta && !$('meta').value.trim()) $('meta').value = t.meta;
   }
+  markBackground();
   save();
 }
 
+const BG_LABELS = {space: 'Космос', city: 'Город', abstract: 'Абстракция'};
+function drawBackgrounds(covers) {
+  const items = [{id: '', style: 'dark', label: 'Синий'},
+                 {id: '', style: 'light', label: 'Белый'}]
+    .concat(covers.map(name => ({id: name, style: 'dark',
+                                 label: BG_LABELS[name] || name})));
+  $('bgs').innerHTML = items.map((it, i) => {
+    const photo = it.id
+      ? `<span class="ph" style="background-image:url(/covers/${it.id}.jpg)"></span>
+         <span class="tint"></span>` : '';
+    return `<button type="button" data-bg="${it.id}" data-style="${it.style}"
+      data-i="${i}"><span class="mini${it.style === 'light' ? ' light' : ''}">${photo}</span>
+      <em>${it.label}</em></button>`;
+  }).join('');
+  $('bgs').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+    $('background').value = b.dataset.bg;
+    $('style').value = b.dataset.style;
+    markBackground();
+    save();
+  }));
+  markBackground();
+}
+function markBackground() {
+  $('bgs').querySelectorAll('button').forEach(b =>
+    b.classList.toggle('on', b.dataset.bg === $('background').value
+                             && b.dataset.style === $('style').value));
+}
+
 fetch('/covers').then(r => r.json()).then(data => {
-  (data.covers || []).forEach(name => {
-    const opt = document.createElement('option');
-    opt.value = name;
-    opt.textContent = name.charAt(0).toUpperCase() + name.slice(1);
-    $('background').appendChild(opt);
-  });
   restore();
-}).catch(() => restore());
+  drawBackgrounds(data.covers || []);
+}).catch(() => { restore(); drawBackgrounds([]); });
 
 $('toggle').addEventListener('click', () => {
   const more = $('more');
   more.hidden = !more.hidden;
-  $('toggle').textContent = more.hidden ? 'Настроить обложку' : 'Свернуть настройки';
+  $('toggle').classList.toggle('open', !more.hidden);
 });
 
 /* ---------- память настроек ---------- */
@@ -431,6 +507,11 @@ document.addEventListener('drop', ev => {
   if (f) { switchTab('pane-file'); setFile(f); }
 });
 fileInput.addEventListener('change', () => setFile(fileInput.files[0]));
+$('photo').addEventListener('change', () => {
+  const f = $('photo').files[0];
+  $('photoname').textContent = f ? f.name : '';
+  if (f) { $('background').value = ''; markBackground(); }
+});
 $('clear').addEventListener('click', () => {
   fileInput.value = ''; chosen.classList.remove('show'); refresh();
 });
