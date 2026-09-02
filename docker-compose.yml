@@ -1,0 +1,16 @@
+services:
+  a2pdf:
+    build: .
+    image: a2pdf:latest
+    container_name: a2pdf
+    ports:
+      - "8000:8000"
+    environment:
+      A2PDF_WORKERS: "2"          # сколько документов собираем одновременно
+      A2PDF_TIMEOUT: "120"        # секунд на один документ
+      A2PDF_MAX_UPLOAD: "20971520"
+    restart: unless-stopped
+    tmpfs:
+      - /tmp
+    # chromium в контейнере требует больше /dev/shm, чем даёт docker по умолчанию
+    shm_size: "512m"
