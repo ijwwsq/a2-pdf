@@ -1,11 +1,13 @@
-"""HTTP-сервис: файл, текст или ссылка на входе — PDF в оформлении A2DATA на выходе.
+"""HTTP-сервис: файл, текст или ссылка на входе — PDF или Word на выходе.
 
     uvicorn a2pdf.web:app --host 0.0.0.0 --port 8000
 
 Эндпоинты:
-    GET  /            веб-форма
-    POST /convert     multipart: file | text | url + поля обложки -> application/pdf
-    GET  /healthz     проверка живости
+    GET  /            форма
+    GET  /login       вход, если он включён
+    POST /convert     multipart: file | text | url + поля оформления
+    GET  /brands      организации, /fonts — наборы шрифтов, /covers — фоны
+    GET  /healthz     состояние сервиса
 """
 from __future__ import annotations
 
@@ -50,6 +52,7 @@ COVERS = core.ASSETS / "covers"          # встроенные фоны обл�
 STATIC = pathlib.Path(__file__).resolve().parent / "static"
 AUTH = auth.Config()
 OUT_DIR = pathlib.Path(os.environ.get("A2PDF_OUT") or tempfile.gettempdir()) / "a2pdf"
+
 
 @contextlib.asynccontextmanager
 async def lifespan(application: FastAPI):

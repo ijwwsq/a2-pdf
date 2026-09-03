@@ -74,10 +74,6 @@ def _get(url: str, headers: dict) -> dict:
         return json.loads(resp.read())
 
 
-# --------------------------------------------------------------------------- #
-# Текст
-# --------------------------------------------------------------------------- #
-
 def _rich_v3(title: list | None) -> str:
     """[[текст, [[формат]]], …] -> строка с markdown-разметкой."""
     if not title:
@@ -139,10 +135,6 @@ def _image_url(block_id: str, source: str) -> str:
     return (f"https://www.notion.so/image/{quoted}"
             f"?table=block&id={block_id}&cache=v2")
 
-
-# --------------------------------------------------------------------------- #
-# Публичный эндпоинт
-# --------------------------------------------------------------------------- #
 
 def _load_public(pid: str) -> dict:
     records: dict = {}
@@ -257,10 +249,6 @@ def _walk_public(pid: str, records: dict, blocks: list, seen: set,
         blocks.insert(0, ("h1", text))
 
 
-# --------------------------------------------------------------------------- #
-# Официальный API
-# --------------------------------------------------------------------------- #
-
 def _walk_official(block_id: str, token: str, blocks: list, depth: int = 0) -> None:
     if depth > 6:
         return
@@ -358,10 +346,6 @@ def _title_official(pid: str, token: str) -> str:
             return _rich_v1(prop.get("title"))
     return ""
 
-
-# --------------------------------------------------------------------------- #
-# Точка входа
-# --------------------------------------------------------------------------- #
 
 def load(url: str, token: str | None = None) -> tuple[list[tuple], dict]:
     """Возвращает блоки страницы и настройки обложки."""

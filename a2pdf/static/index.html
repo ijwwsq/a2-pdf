@@ -326,6 +326,11 @@ footer{padding:14px 28px;border-top:1px solid var(--n200);background:var(--n0);
         </div>
 
         <div class="group">
+          <h3>Шрифт документа</h3>
+          <select id="fontset"><option value="">Как в брендбуке</option></select>
+        </div>
+
+        <div class="group">
           <h3>Реквизиты внизу обложки</h3>
           <textarea id="meta" spellcheck="false" placeholder="Клиент=ООО Пример&#10;Срок=10 недель"></textarea>
         </div>
@@ -523,7 +528,7 @@ fetch('/fonts').then(r => r.json()).then(data => {
     const opt = document.createElement('option');
     opt.value = f.key;
     opt.textContent = f.title;
-    $('fontset').appendChild(opt);
+    if ($('fontset')) $('fontset').appendChild(opt);
   });
   restore();
 }).catch(() => {});
@@ -544,17 +549,17 @@ const REMEMBER = ['footer', 'header', 'style', 'background', 'fontset'];
 function save() {
   try {
     const data = {};
-    REMEMBER.forEach(k => data[k] = $(k).value);
+    REMEMBER.forEach(k => { if ($(k)) data[k] = $(k).value; });
     localStorage.setItem('a2pdf', JSON.stringify(data));
   } catch (e) {}
 }
 function restore() {
   try {
     const data = JSON.parse(localStorage.getItem('a2pdf') || '{}');
-    REMEMBER.forEach(k => { if (data[k]) $(k).value = data[k]; });
+    REMEMBER.forEach(k => { if (data[k] && $(k)) $(k).value = data[k]; });
   } catch (e) {}
 }
-REMEMBER.forEach(k => $(k).addEventListener('change', save));
+REMEMBER.forEach(k => { if ($(k)) $(k).addEventListener('change', save); });
 
 /* ---------- готовность ---------- */
 function ready() {
@@ -624,7 +629,7 @@ $('form').addEventListener('submit', async (ev) => {
   body.append('style', $('style').value);
   body.append('format', format);
   body.append('brand', org);
-  if ($('fontset').value) body.append('font', $('fontset').value);
+  if ($('fontset') && $('fontset').value) body.append('font', $('fontset').value);
   if ($('background').value) body.append('background', $('background').value);
   if ($('photo').files[0]) body.append('photo', $('photo').files[0]);
   if (!$('cover').checked) body.append('cover', '0');

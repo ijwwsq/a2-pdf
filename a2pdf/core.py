@@ -1,37 +1,37 @@
-"""a2pdf — markdown в PDF в фирменном оформлении A2DATA.
+"""Разбор markdown и сборка документа: HTML со стилями бренда печатается
+браузером в PDF, страницы склеиваются и получают колонтитулы.
 
-    python tools/a2pdf.py документ.md
-    python tools/a2pdf.py документ.md -o готовый.pdf --confidential
-    python tools/a2pdf.py папка/*.md
+    python -m a2pdf документ.md
+    python -m a2pdf документ.md --brand becloud --docx
 
-Оформление берётся из брендбука: navy #0B2660, blue #1FA8FC, amber #FF9F1C,
-Inter + JetBrains Mono. Шрифты встраиваются в PDF, диаграммы mermaid рисуются
-в брендовой теме.
+Оформление приходит из brands.py: цвета, шрифты, логотип. Шрифты встраиваются
+в файл, диаграммы mermaid рисуются в палитре бренда.
 
 Обложка и колонтитулы настраиваются front matter в начале md-файла:
 
     ---
-    title: Rate Limiter                  # по умолчанию — первый H1
+    title: Rate Limiter
     subtitle: Ограничение частоты запросов
-    kicker: Тестовое задание             # надпись над заголовком
-    index: "01"                          # крупная цифра на обложке
-    confidential: Не для кандидатов      # янтарная плашка
-    footer: Python Backend Developer     # левый нижний колонтитул
-    header: Тестовое задание · 01        # правый верхний колонтитул
-    numbered: true                       # нумеровать разделы H2
+    kicker: Тестовое задание
+    index: "01"
+    brand: a2data
+    font: inter
+    confidential: Не для кандидатов
+    header: Тестовое задание · Rate Limiter
+    footer: Python Backend Developer · a2data.ai
+    style: dark
+    photo: cover.jpg
+    numbered: true
     meta:
       Роль: Python Backend
       Таймбокс: 4 часа
     ---
 
-Дополнительная разметка внутри md:
+Разметка внутри текста:
 
     <!--PART:Часть 2|Разбор для проверяющего-->   разделитель между частями
-    <!--CAP:Пояснение под схемой-->                подпись к диаграмме
+    <!--CAP:Пояснение под схемой-->               подпись к диаграмме
     <!--NUMBERING:off-->                          выключить нумерацию разделов
-
-Зависимости: Python 3.12+, pymupdf, установленный Chrome или Edge.
-Ассеты (шрифты, mermaid) скачиваются один раз в tools/assets/.
 """
 from __future__ import annotations
 
@@ -76,10 +76,6 @@ CHROME_CANDIDATES = [
 
 SITE = "a2data.ai"
 COMPANY = "A2DATA"
-
-# --------------------------------------------------------------------------- #
-# Ассеты
-# --------------------------------------------------------------------------- #
 
 
 def _get(url: str) -> bytes:
@@ -135,11 +131,6 @@ def ensure_assets(quiet: bool = False) -> None:
     if not mjs.exists():
         say("Скачиваю mermaid…")
         mjs.write_bytes(_get(MERMAID_JS))
-
-
-# --------------------------------------------------------------------------- #
-# Front matter и разбор markdown
-# --------------------------------------------------------------------------- #
 
 
 def split_front_matter(md: str) -> tuple[dict, str]:
@@ -290,10 +281,6 @@ def parse(md: str, keep_mermaid: bool = True) -> list[tuple]:
     return blocks
 
 
-# --------------------------------------------------------------------------- #
-# Рендер блоков в HTML
-# --------------------------------------------------------------------------- #
-
 META_STRIP = re.compile(r"^\*\*([^*]+):\*\*\s*(.+?)\s*·\s*\*\*([^*]+):\*\*\s*(.+)$")
 
 
@@ -388,10 +375,6 @@ def render(blocks: list[tuple], numbered: bool = True,
             out.append('<div class="rule"></div>')
     return "\n".join(out)
 
-
-# --------------------------------------------------------------------------- #
-# Стили
-# --------------------------------------------------------------------------- #
 
 BASE = """
 *{box-sizing:border-box;margin:0;padding:0}
@@ -717,11 +700,6 @@ def save(doc: pymupdf.Document, pdf_path: pathlib.Path) -> pathlib.Path:
         doc.save(pdf_path, garbage=4, deflate=True)
         print(f"  файл занят другим приложением, сохранил как {pdf_path.name}")
     return pdf_path
-
-
-# --------------------------------------------------------------------------- #
-# Основная сборка
-# --------------------------------------------------------------------------- #
 
 
 def _cover_class(front: dict) -> str:

@@ -66,10 +66,6 @@ class Theme:
         self.mono = fonts.word_mono
 
 
-# --------------------------------------------------------------------------- #
-# Мелкие помощники для XML, которого нет в python-docx
-# --------------------------------------------------------------------------- #
-
 def _shade(element, color: str) -> None:
     shd = OxmlElement("w:shd")
     shd.set(qn("w:val"), "clear")
@@ -146,10 +142,6 @@ def _spacing(paragraph, before: float = 0, after: float = 0,
         fmt.line_spacing = line
 
 
-# --------------------------------------------------------------------------- #
-# Текст
-# --------------------------------------------------------------------------- #
-
 INLINE_RE = re.compile(r"(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)")
 
 
@@ -193,10 +185,6 @@ def _runs(paragraph, theme: "Theme", text: str, size: float = 10.5,
 def _plain(text: str) -> str:
     return re.sub(r"[*`]", "", str(text))
 
-
-# --------------------------------------------------------------------------- #
-# Диаграммы: их рисует браузер, Word получает картинку
-# --------------------------------------------------------------------------- #
 
 def _content_box(page) -> pymupdf.Rect:
     """Прямоугольник вокруг нарисованного — чтобы не тащить поля страницы."""
@@ -277,10 +265,6 @@ def _load_image(src: str) -> bytes | None:
     path = pathlib.Path(src)
     return path.read_bytes() if path.is_file() else None
 
-
-# --------------------------------------------------------------------------- #
-# Стили, обложка и колонтитулы
-# --------------------------------------------------------------------------- #
 
 def _setup_styles(document: Document, theme: "Theme") -> None:
     normal = document.styles["Normal"]
@@ -480,10 +464,6 @@ def _runners(document: Document, theme: "Theme", front: dict) -> None:
     _style_run(separator, 8, theme.light, theme.mono)
     _field(right, theme, "NUMPAGES", color=theme.light)
 
-
-# --------------------------------------------------------------------------- #
-# Сборка
-# --------------------------------------------------------------------------- #
 
 def write_docx(blocks: list[tuple], front: dict, out_path: pathlib.Path,
                chrome: str | None = None, name: str = "document") -> pathlib.Path:

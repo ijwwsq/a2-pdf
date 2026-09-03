@@ -35,10 +35,6 @@ ATTEMPT_WINDOW = 300      # за сколько секунд
 _attempts: dict[str, deque] = {}
 
 
-# --------------------------------------------------------------------------- #
-# Пароль
-# --------------------------------------------------------------------------- #
-
 def hash_password(password: str, salt: bytes | None = None) -> str:
     """scrypt-хеш в виде scrypt$соль$хеш — его кладут в переменную окружения."""
     salt = salt or secrets.token_bytes(16)
@@ -57,10 +53,6 @@ def verify_password(password: str, stored: str) -> bool:
         return False
     return hmac.compare_digest(digest.hex(), digest_hex)
 
-
-# --------------------------------------------------------------------------- #
-# Настройки
-# --------------------------------------------------------------------------- #
 
 class Config:
     """Учётная запись и секрет сервиса, прочитанные из окружения."""
@@ -93,10 +85,6 @@ def is_local(host: str | None) -> bool:
         return host in ("localhost", "testclient")
 
 
-# --------------------------------------------------------------------------- #
-# Сессия
-# --------------------------------------------------------------------------- #
-
 def _sign(config: Config, payload: str) -> str:
     digest = hmac.new(config.secret, payload.encode("utf-8"),
                       hashlib.sha256).digest()
@@ -126,10 +114,6 @@ def validate(config: Config, cookie: str | None) -> str | None:
         return None
     return user if user == config.user else None
 
-
-# --------------------------------------------------------------------------- #
-# Защита от подбора
-# --------------------------------------------------------------------------- #
 
 def attempt_allowed(client: str) -> bool:
     now = time.monotonic()

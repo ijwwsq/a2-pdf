@@ -37,7 +37,6 @@ class HtmlBlocks(HTMLParser):
         self._table: list[list[str]] | None = None
         self._heading: str | None = None
 
-    # --- вспомогательное ---------------------------------------------------
     def _take(self) -> str:
         raw = "".join(self._text)
         self._text = []
@@ -48,7 +47,6 @@ class HtmlBlocks(HTMLParser):
         if text:
             self.blocks.append((kind, text))
 
-    # --- разбор ------------------------------------------------------------
     def handle_starttag(self, tag, attrs):
         if self._skip_depth or tag in SKIP:
             if tag not in VOID:
