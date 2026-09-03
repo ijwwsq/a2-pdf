@@ -88,8 +88,8 @@ def _get(url: str) -> bytes:
         return resp.read()
 
 
-def fonts_css_path(brand_key: str = brands.DEFAULT) -> pathlib.Path:
-    return ASSETS / f"fonts-{brand_key}.css"
+def fonts_css_path(font_key: str = brands.INTER.key) -> pathlib.Path:
+    return ASSETS / f"fonts-{font_key}.css"
 
 
 def ensure_assets(quiet: bool = False) -> None:
@@ -97,12 +97,12 @@ def ensure_assets(quiet: bool = False) -> None:
     ASSETS.mkdir(parents=True, exist_ok=True)
     say = (lambda *a: None) if quiet else print
 
-    for brand in brands.BRANDS.values():
-        css = fonts_css_path(brand.key)
+    for fonts in brands.FONT_SETS.values():
+        css = fonts_css_path(fonts.key)
         if css.exists():
             continue
-        say(f"Скачиваю шрифты бренда {brand.name}…")
-        raw = _get(GOOGLE_FONTS.format(query=brand.fonts.query)).decode("utf-8")
+        say(f"Скачиваю набор шрифтов «{fonts.title}»…")
+        raw = _get(GOOGLE_FONTS.format(query=fonts.query)).decode("utf-8")
         faces, seen = [], set()
         for subset, block in re.findall(
                 r"/\*\s*([\w-]+)\s*\*/\s*(@font-face\s*\{[^}]+\})", raw):
@@ -308,6 +308,27 @@ def embed_image(src: str) -> str:
     return f"data:{mime};base64," + base64.b64encode(path.read_bytes()).decode("ascii")
 
 
+ATOMIC = re.compile(r"^[\w.,%+/()\u2212-]{1,24}$", re.UNICODE)
+
+
+def _cell(text: str) -> str:
+    """Короткое значение без пробелов не переносим: иначе id рвётся пополам."""
+    value = inline(text)
+    stripped = str(text).strip()
+    if stripped and " " not in stripped and ATOMIC.match(stripped):
+        return f'<span class="nb">{value}</span>'
+    return value
+
+
+def _table_class(columns: int) -> str:
+    """Чем больше колонок, тем мельче набор — иначе колонки не помещаются."""
+    if columns >= 8:
+        return " class=\"xwide\""
+    if columns >= 6:
+        return " class=\"wide\""
+    return ""
+
+
 def render(blocks: list[tuple], numbered: bool = True,
            drop_h1: bool = True) -> str:
     out: list[str] = []
@@ -347,9 +368,10 @@ def render(blocks: list[tuple], numbered: bool = True,
             out.append(f'<div class="note"><p>{inline(b[1])}</p></div>')
         elif kind == "table":
             head = "".join(f"<th>{inline(c)}</th>" for c in b[1])
-            body = "".join("<tr>" + "".join(f"<td>{inline(c)}</td>" for c in row)
+            body = "".join("<tr>" + "".join(f"<td>{_cell(c)}</td>" for c in row)
                            + "</tr>" for row in b[2])
-            out.append(f"<table><thead><tr>{head}</tr></thead>"
+            out.append(f"<table{_table_class(len(b[1]))}>"
+                       f"<thead><tr>{head}</tr></thead>"
                        f"<tbody>{body}</tbody></table>")
         elif kind == "image":
             src = embed_image(b[1])
@@ -406,8 +428,8 @@ body{width:210mm;height:296.5mm;overflow:hidden}
   background:var(--mark);z-index:2}
 
 .top{display:flex;justify-content:space-between;align-items:baseline;padding-top:8mm}
-.wordmark{width:25mm;line-height:0}
-.wordmark svg{width:100%;height:auto;display:block}
+.wordmark{width:var(--logo-width);line-height:0}
+.wordmark svg,.wordmark img{width:100%;height:auto;display:block}
 .top .role{font-family:var(--mono);font-size:7.4pt;letter-spacing:2px;
            text-transform:uppercase;color:var(--muted)}
 
@@ -476,10 +498,19 @@ table{width:100%;border-collapse:collapse;margin:0 0 4mm;font-size:9pt}
 thead{display:table-header-group}   /* шапка повторяется на каждой странице */
 tr{break-inside:avoid}
 th{background:var(--brand);color:#fff;text-align:left;font-weight:600;padding:3mm 3.2mm;
-   font-size:8.4pt;letter-spacing:.2px}
+   font-size:8.4pt;letter-spacing:.2px;vertical-align:bottom}
 th strong,th code,th a{color:#fff;background:none;border:0}
+/* перенос только там, где слово шире колонки: иначе рвутся слова и числа */
+td,th{overflow-wrap:break-word;word-break:normal;hyphens:none}
 td{padding:2.8mm 3.2mm;border-bottom:.25mm solid var(--n100);vertical-align:top;
-   overflow-wrap:anywhere;line-height:1.45}
+   line-height:1.45}
+.nb{white-space:nowrap}                 /* id, суммы, проценты — целиком */
+table.wide{font-size:8pt}
+table.wide th{padding:2.4mm 2.4mm;font-size:7.6pt}
+table.wide td{padding:2.2mm 2.4mm}
+table.xwide{font-size:7.4pt}
+table.xwide th{padding:2mm 2mm;font-size:7pt;letter-spacing:0}
+table.xwide td{padding:1.9mm 2mm;line-height:1.35}
 tbody tr:nth-child(even) td{background:var(--n50)}
 .note{border-left:.9mm solid var(--mark);background:var(--mark-50);padding:4mm 5.5mm;
       margin:0 0 4.5mm;border-radius:0 2mm 2mm 0;break-inside:avoid}
@@ -522,9 +553,10 @@ tbody tr:nth-child(even) td{background:var(--n50)}
 .part .ttl{font-size:13pt;font-weight:700;color:var(--brand);letter-spacing:-.3px}
 """
 
-def mermaid_init(brand: brands.Brand) -> str:
-    """Тема mermaid в цветах бренда."""
-    color = brand.color
+def mermaid_init(brand: brands.Brand,
+                 fonts: brands.Fonts | None = None) -> str:
+    """Тема mermaid в цветах бренда и выбранных шрифтах."""
+    fonts = fonts or brand.fonts
     return """
 mermaid.initialize({
   startOnLoad:false, theme:'base', securityLevel:'loose',
@@ -559,7 +591,7 @@ for (const svg of document.querySelectorAll('.dg-mermaid svg')) {
   svg.style.width = 'auto';
   svg.style.height = 'auto';
 }
-""" % {"body": brand.fonts.body, **brand.colors, **brand.neutrals}
+""" % {"body": fonts.body, **brand.colors, **brand.neutrals}
 
 
 COVER_TPL = """<!doctype html>
@@ -715,25 +747,33 @@ LOGO_DIR = ASSETS / "logo"
 
 
 def logo_svg(brand: brands.Brand, on_dark: bool) -> str:
-    """Вордмарк из брендбука: буквы в кривых, поэтому шрифт не нужен."""
+    """Логотип из брендбука: вектор, если он есть, иначе картинка."""
     tone = "white" if on_dark else "color"
-    path = LOGO_DIR / f"{brand.logo}-{tone}.svg"
-    return path.read_text(encoding="utf-8") if path.is_file() else ""
+    vector = LOGO_DIR / f"{brand.logo}-{tone}.svg"
+    if vector.is_file():
+        return vector.read_text(encoding="utf-8")
+    raster = LOGO_DIR / f"{brand.logo}-{tone}.png"
+    if raster.is_file():
+        data = base64.b64encode(raster.read_bytes()).decode("ascii")
+        return f'<img src="data:image/png;base64,{data}" alt="">'
+    return ""
 
 
 def cover_html(front: dict) -> str:
     """HTML обложки: используется и для PDF, и для картинки в .docx."""
     ensure_assets(quiet=True)
     brand = brands.get(front.get("brand"))
-    fonts_css = fonts_css_path(brand.key).read_text(encoding="utf-8")
+    fonts = brands.fonts_for(brand, front.get("font"))
+    fonts_css = fonts_css_path(fonts.key).read_text(encoding="utf-8")
     meta_items = list((front.get("meta") or {}).items())
     spec = "".join(f'<div><div class="k">{html.escape(str(k))}</div>'
                    f'<div class="v">{html.escape(str(v))}</div></div>'
                    for k, v in meta_items)
     return COVER_TPL.format(
         title=html.escape(str(front.get("title", ""))), fonts=fonts_css,
-        css=brands.tokens(brand) + COVER_CSS,
-        role=html.escape(str(front.get("role", brand.tagline or brand.name))),
+        css=(brands.tokens(brand, fonts)
+             + f":root{{--logo-width:{brand.logo_width_mm}mm}}" + COVER_CSS),
+        role=html.escape(str(front.get("role", brand.tagline))),
         chip=(f'<div class="chip">{html.escape(str(front["confidential"]))}</div>'
               if front.get("confidential") else ""),
         logo=logo_svg(brand, str(front.get("style", brand.cover_style)).lower()
@@ -772,20 +812,22 @@ def render_pdf(blocks: list[tuple], front: dict, out_path: pathlib.Path,
     numbered = str(front.get("numbered", "true")).lower() not in ("false", "0", "no")
     has_mermaid = any(b[0] == "mermaid" for b in blocks)
     brand = brands.get(front.get("brand"))
-    fonts_css = fonts_css_path(brand.key).read_text(encoding="utf-8")
+    fonts = brands.fonts_for(brand, front.get("font"))
+    fonts_css = fonts_css_path(fonts.key).read_text(encoding="utf-8")
     content = render(blocks, numbered=numbered)
 
     mermaid_tag = ""
     if has_mermaid:
         lib = (ASSETS / "mermaid.min.js").read_text(encoding="utf-8")
         mermaid_tag = (f"<script>{lib}</script>"
-                       f"<script type=\"module\">{mermaid_init(brand)}</script>")
+                       f"<script type=\"module\">"
+                       f"{mermaid_init(brand, fonts)}</script>")
 
     stem = re.sub(r"[^\w.-]+", "_", name)[:50] + f"-{os.getpid()}-{id(blocks) & 0xffff:x}"
     body_html = TMP / f"{stem}-body.html"
     body_html.write_text(BODY_TPL.format(
         title=html.escape(str(front["title"])), fonts=fonts_css,
-        css=brands.tokens(brand) + BODY_CSS,
+        css=brands.tokens(brand, fonts) + BODY_CSS,
         content=content, mermaid=mermaid_tag), encoding="utf-8")
     body_pdf = TMP / f"{stem}-body.pdf"
     print_pdf(body_html, body_pdf, chrome, 15000 if has_mermaid else 5000)
@@ -930,6 +972,8 @@ def main(argv: list[str] | None = None) -> None:
                     help="дописать в конец ещё один md")
     ap.add_argument("--brand", choices=sorted(brands.BRANDS),
                     help="организация: чьё оформление применять")
+    ap.add_argument("--font", choices=sorted(brands.FONT_SETS),
+                    help="набор шрифтов; по умолчанию — из брендбука")
     ap.add_argument("--docx", action="store_true",
                     help="собрать .docx вместо PDF")
     ap.add_argument("--photo", help="фото на обложку: путь к файлу или ссылка")
@@ -941,7 +985,7 @@ def main(argv: list[str] | None = None) -> None:
 
     overrides: dict = {}
     for name in ("title", "subtitle", "kicker", "index", "footer", "header",
-                 "photo", "style", "brand"):
+                 "photo", "style", "brand", "font"):
         if getattr(args, name):
             overrides[name] = getattr(args, name)
     if args.confidential:

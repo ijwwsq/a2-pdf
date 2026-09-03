@@ -62,7 +62,7 @@ button:hover{background:var(--navy-900)}
 fetch('/brands-public').then(r => r.json()).then(data => {
   const box = document.getElementById('brands');
   box.innerHTML = (data.brands || []).map((b, i) =>
-    (i ? '<span></span>' : '') + `<img src="/logo/${b}-color.svg" alt="">`).join('');
+    (i ? '<span></span>' : '') + `<img src="/logo/${b}-color" alt="">`).join('');
 }).catch(() => {});
 </script>
 </body>

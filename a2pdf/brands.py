@@ -23,6 +23,8 @@ from dataclasses import dataclass, field
 @dataclass(frozen=True)
 class Fonts:
     """Шрифты для вёрстки и их запрос к Google Fonts."""
+    key: str                # чем набор выбирается в форме и API
+    title: str              # как он называется для человека
     display: str            # заголовки
     body: str               # основной текст
     mono: str               # технический слой
@@ -44,11 +46,53 @@ class Brand:
     fonts: Fonts
     cover_style: str = "dark"          # каким фоном обложка выглядит по умолчанию
     logo: str = ""                     # имя файлов логотипа в assets/logo
+    logo_width_mm: float = 25          # ширина знака на обложке
+    logo_width_cm: float = 3.2         # ширина знака на титуле Word
     tagline: str = ""
     neutrals: dict[str, str] = field(default_factory=dict)
 
     def color(self, role: str) -> str:
         return self.colors[role]
+
+
+MONO_QUERY = "&family=JetBrains+Mono:wght@400;500"
+
+INTER = Fonts(
+    key="inter", title="Inter",
+    display="Inter", body="Inter", mono="JetBrains Mono",
+    query="Inter:wght@400;500;600;700;800" + MONO_QUERY,
+    word_body="Segoe UI", word_display="Segoe UI", word_mono="Consolas")
+
+OSWALD = Fonts(
+    key="oswald", title="Oswald + Roboto Condensed",
+    display="Oswald", body="Roboto Condensed", mono="JetBrains Mono",
+    query=("Oswald:wght@300;400;500;600"
+           "&family=Roboto+Condensed:wght@300;400;700" + MONO_QUERY),
+    word_body="Segoe UI", word_display="Bahnschrift", word_mono="Consolas",
+    display_weight=500, display_tracking="0px")
+
+MANROPE = Fonts(
+    key="manrope", title="Manrope",
+    display="Manrope", body="Manrope", mono="JetBrains Mono",
+    query="Manrope:wght@400;500;600;700;800" + MONO_QUERY,
+    word_body="Segoe UI", word_display="Segoe UI", word_mono="Consolas")
+
+ROBOTO = Fonts(
+    key="roboto", title="Roboto",
+    display="Roboto", body="Roboto", mono="Roboto Mono",
+    query=("Roboto:wght@400;500;700;900"
+           "&family=Roboto+Mono:wght@400;500"),
+    word_body="Segoe UI", word_display="Segoe UI", word_mono="Consolas")
+
+PT_SERIF = Fonts(
+    key="serif", title="PT Serif + PT Sans",
+    display="PT Sans", body="PT Serif", mono="JetBrains Mono",
+    query=("PT+Serif:wght@400;700&family=PT+Sans:wght@400;700" + MONO_QUERY),
+    word_body="Georgia", word_display="Segoe UI", word_mono="Consolas",
+    display_tracking="-.2px")
+
+FONT_SETS: dict[str, Fonts] = {f.key: f for f in
+                               (INTER, OSWALD, MANROPE, ROBOTO, PT_SERIF)}
 
 
 NEUTRALS_COOL = {"n0": "#FFFFFF", "n50": "#F7F8FA", "n100": "#EFF1F4",
@@ -74,11 +118,7 @@ A2DATA = Brand(
         "ink": "#111722", "muted": "#8FA6CE",
     },
     neutrals=NEUTRALS_COOL,
-    fonts=Fonts(
-        display="Inter", body="Inter", mono="JetBrains Mono",
-        query=("Inter:wght@400;500;600;700;800"
-               "&family=JetBrains+Mono:wght@400;500"),
-        word_body="Segoe UI", word_display="Segoe UI", word_mono="Consolas"),
+    fonts=INTER,
     cover_style="dark",
     logo="a2data",
 )
@@ -88,7 +128,7 @@ BECLOUD = Brand(
     name="BeCloud.AI",
     site="becloud.ai",
     place="Almaty, Kazakhstan",
-    tagline="Let your data work",
+    tagline="",
     colors={
         "brand": "#2F3586", "brand_dark": "#17194F",
         "brand_50": "#F1F2F9", "brand_100": "#DDDFF0",
@@ -98,16 +138,13 @@ BECLOUD = Brand(
         "ink": "#0F0F14", "muted": "#8A8FA3",
     },
     neutrals=NEUTRALS_BECLOUD,
-    fonts=Fonts(
-        display="Oswald", body="Roboto Condensed", mono="JetBrains Mono",
-        query=("Oswald:wght@300;400;500;600"
-               "&family=Roboto+Condensed:wght@300;400;700"
-               "&family=JetBrains+Mono:wght@400;500"),
-        # в Word фирменных шрифтов нет: Bahnschrift — ближайший узкий гротеск
-        word_body="Segoe UI", word_display="Bahnschrift", word_mono="Consolas",
-        display_weight=500, display_tracking="0px"),
+    # в Word фирменных шрифтов нет: Bahnschrift — ближайший узкий гротеск
+    fonts=OSWALD,
     cover_style="dark",
     logo="becloud",
+    # в знак BeCloud входит слоган, поэтому он крупнее
+    logo_width_mm=38,
+    logo_width_cm=4.6,
 )
 
 BRANDS: dict[str, Brand] = {brand.key: brand for brand in (A2DATA, BECLOUD)}
@@ -119,14 +156,20 @@ def get(key: str | None) -> Brand:
     return BRANDS.get((key or "").strip().lower(), BRANDS[DEFAULT])
 
 
+def fonts_for(brand: Brand, key: str | None = None) -> Fonts:
+    """Набор шрифтов: выбранный вручную или тот, что задан брендбуком."""
+    return FONT_SETS.get((key or "").strip().lower(), brand.fonts)
+
+
 def rgba(color: str, alpha: float) -> str:
     color = color.lstrip("#")
     red, green, blue = (int(color[i:i + 2], 16) for i in (0, 2, 4))
     return f"rgba({red},{green},{blue},{alpha})"
 
 
-def tokens(brand: Brand) -> str:
-    """CSS-переменные бренда для вёрстки документа."""
+def tokens(brand: Brand, fonts: Fonts | None = None) -> str:
+    """CSS-переменные бренда и выбранного набора шрифтов."""
+    fonts = fonts or brand.fonts
     values = {**brand.colors, **brand.neutrals}
     lines = "".join(f"  --{role.replace('_', '-')}:{value};\n"
                     for role, value in values.items())
@@ -138,10 +181,10 @@ def tokens(brand: Brand) -> str:
             f"  --muted-on-dark:{brand.colors['muted']};\n"
             f"  --cover-glow:{glow};\n"
             f"  --cover-tint:{tint};\n" +
-            f"  --font:'{brand.fonts.body}','Segoe UI',Arial,sans-serif;\n"
-            f"  --display:'{brand.fonts.display}','{brand.fonts.body}',"
+            f"  --font:'{fonts.body}','Segoe UI',Arial,sans-serif;\n"
+            f"  --display:'{fonts.display}','{fonts.body}',"
             "'Segoe UI',Arial,sans-serif;\n"
-            f"  --mono:'{brand.fonts.mono}','Cascadia Mono',Consolas,monospace;\n"
-            f"  --display-weight:{brand.fonts.display_weight};\n"
-            f"  --display-tracking:{brand.fonts.display_tracking};\n"
+            f"  --mono:'{fonts.mono}','Cascadia Mono',Consolas,monospace;\n"
+            f"  --display-weight:{fonts.display_weight};\n"
+            f"  --display-tracking:{fonts.display_tracking};\n"
             "}\n")

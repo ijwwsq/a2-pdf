@@ -43,8 +43,10 @@ class Theme:
     документ подставит засечки. Поэтому берём системные, близкие по духу.
     """
 
-    def __init__(self, brand: brands.Brand) -> None:
+    def __init__(self, brand: brands.Brand,
+                 fonts: brands.Fonts | None = None) -> None:
         self.brand = brand
+        fonts = fonts or brand.fonts
         self.main = _rgb(brand.color("brand"))
         self.accent = _rgb(brand.color("accent"))
         self.accent_dark = _rgb(brand.color("accent_dark"))
@@ -58,9 +60,10 @@ class Theme:
         self.hex_line = brand.neutrals["n200"].lstrip("#")
         self.hex_soft = brand.neutrals["n50"].lstrip("#")
         self.hex_mark_bg = brand.color("mark_50").lstrip("#")
-        self.font = brand.fonts.word_body
-        self.display = brand.fonts.word_display
-        self.mono = brand.fonts.word_mono
+        self.fonts = fonts
+        self.font = fonts.word_body
+        self.display = fonts.word_display
+        self.mono = fonts.word_mono
 
 
 # --------------------------------------------------------------------------- #
@@ -231,18 +234,19 @@ def _pages_to_png(html_text: str, chrome: str, name: str,
         pdf_path.unlink(missing_ok=True)
 
 
-def _diagram_images(sources: list[str], brand: brands.Brand, chrome: str,
+def _diagram_images(sources: list[str], theme: "Theme", chrome: str,
                     name: str) -> list[tuple[bytes, float]]:
     if not sources:
         return []
-    fonts = core.fonts_css_path(brand.key).read_text(encoding="utf-8")
+    brand = theme.brand
+    fonts = core.fonts_css_path(theme.fonts.key).read_text(encoding="utf-8")
     lib = (core.ASSETS / "mermaid.min.js").read_text(encoding="utf-8")
     body = "".join(
         '<div class="page"><div class="dg dg-mermaid"><pre class="mermaid">'
         f'{html_mod.escape(src)}</pre></div></div>' for src in sources)
     page = (f'<!doctype html><html lang="ru"><head><meta charset="utf-8">'
             f'<style>{fonts}</style>'
-            f'<style>{brands.tokens(brand)}{core.BODY_CSS}'
+            f'<style>{brands.tokens(brand, theme.fonts)}{core.BODY_CSS}'
             '@page{size:A4;margin:8mm}'
             '.page{break-after:page;display:flex;align-items:center;'
             'justify-content:center;height:281mm}'
@@ -250,7 +254,8 @@ def _diagram_images(sources: list[str], brand: brands.Brand, chrome: str,
             '.dg-mermaid svg{max-height:275mm}'
             f'</style></head><body>{body}'
             f'<script>{lib}</script>'
-            f'<script type="module">{core.mermaid_init(brand)}</script>'
+            f'<script type="module">'
+            f'{core.mermaid_init(brand, theme.fonts)}</script>'
             '</body></html>')
     return _pages_to_png(page, chrome, f"{name}-diagrams", crop=True)
 
@@ -346,7 +351,7 @@ def _cover(document: Document, theme: "Theme", front: dict) -> None:
 
     logo = document.add_paragraph()
     _spacing(logo, before=10, after=4)
-    _wordmark(logo, theme, 3.2)
+    _wordmark(logo, theme, theme.brand.logo_width_cm)
 
     rule = document.add_paragraph()
     _spacing(rule, before=0, after=0)
@@ -456,7 +461,7 @@ def _runners(document: Document, theme: "Theme", front: dict) -> None:
     header.paragraphs[0].text = ""
     _spacing(header.paragraphs[0], after=0, line=0.6)
     _, left, right = _runner_table(header, width)
-    _wordmark(left, theme, 1.7)
+    _wordmark(left, theme, theme.brand.logo_width_cm * 0.55)
     caption = right.add_run(_plain(front.get("header", front.get("title", ""))))
     _style_run(caption, 8, theme.gray, theme.font)
     rule = header.add_paragraph()
@@ -486,7 +491,8 @@ def write_docx(blocks: list[tuple], front: dict, out_path: pathlib.Path,
     core.ensure_assets(quiet=True)
     chrome = chrome or core.find_chrome()
     front = dict(front)
-    theme = Theme(brands.get(front.get("brand")))
+    brand = brands.get(front.get("brand"))
+    theme = Theme(brand, brands.fonts_for(brand, front.get("font")))
     if not front.get("title"):
         first = next((b[1] for b in blocks if b[0] == "h1"), name)
         front["title"] = re.sub(r"^Задание\s+\d+\.\s*", "", str(first))
@@ -506,7 +512,7 @@ def write_docx(blocks: list[tuple], front: dict, out_path: pathlib.Path,
     _runners(document, theme, front)
 
     diagrams = _diagram_images([b[1] for b in blocks if b[0] == "mermaid"],
-                               theme.brand, chrome, name)
+                               theme, chrome, name)
     diagram_no = 0
     numbered = str(front.get("numbered", "true")).lower() not in ("false", "0", "no")
     section_no = 0

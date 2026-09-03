@@ -9,6 +9,7 @@ scrypt-хеш, полученный командой
 на секрете сервиса. Подделать её без секрета нельзя, а сервер не хранит состояние.
 
 Переменные окружения:
+    A2PDF_AUTH            off — вход отключён (для закрытого контура)
     A2PDF_USER            имя пользователя (по умолчанию admin)
     A2PDF_PASSWORD_HASH   scrypt-хеш пароля
     A2PDF_SECRET          секрет для подписи сессий
@@ -65,6 +66,8 @@ class Config:
     """Учётная запись и секрет сервиса, прочитанные из окружения."""
 
     def __init__(self) -> None:
+        self.enabled = os.environ.get("A2PDF_AUTH", "on").strip().lower() not in (
+            "off", "0", "false", "no")
         self.user = os.environ.get("A2PDF_USER", "admin").strip()
         self.password_hash = os.environ.get("A2PDF_PASSWORD_HASH", "").strip()
         self.hours = int(os.environ.get("A2PDF_SESSION_HOURS", 12))
@@ -76,7 +79,8 @@ class Config:
 
     @property
     def configured(self) -> bool:
-        return bool(self.password_hash)
+        """Нужно ли спрашивать вход: выключенная проверка тоже «настроена»."""
+        return self.enabled and bool(self.password_hash)
 
 
 def is_local(host: str | None) -> bool:

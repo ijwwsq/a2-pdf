@@ -57,7 +57,10 @@ async def lifespan(application: FastAPI):
     core.ensure_assets(quiet=True)
     application.state.chrome = core.find_chrome()
     log.info("chrome: %s, воркеров: %s", application.state.chrome, WORKERS)
-    if not AUTH.configured:
+    if not AUTH.enabled:
+        log.warning("Вход отключён (A2PDF_AUTH=off): сервис открыт всем, "
+                    "кто до него дотянется")
+    elif not AUTH.configured:
         log.warning("Учётная запись не настроена: сервис отвечает только "
                     "с локальной машины. Задайте A2PDF_PASSWORD_HASH "
                     "(python -m a2pdf.auth)")
@@ -127,6 +130,8 @@ def current_user(request: Request,
                  session: str | None = Cookie(default=None, alias=auth.COOKIE)
                  ) -> str:
     """Пускает по действующей сессии; без учётки — только с локальной машины."""
+    if not AUTH.enabled:
+        return "anonymous"
     if not AUTH.configured:
         if auth.is_local(_client(request)):
             return "local"
@@ -158,6 +163,8 @@ def brands_public() -> JSONResponse:
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request,
                session: str | None = Cookie(default=None, alias=auth.COOKIE)):
+    if not AUTH.enabled:
+        return RedirectResponse("/", status_code=303)
     if AUTH.configured and auth.validate(AUTH, session):
         return RedirectResponse("/", status_code=303)
     page = (STATIC / "login.html").read_text(encoding="utf-8")
@@ -200,6 +207,7 @@ def logout(request: Request):
 def healthz() -> JSONResponse:
     return JSONResponse({"status": "ok", "version": app.version,
                          "chrome": getattr(app.state, "chrome", None),
+                         "auth": AUTH.enabled,
                          "notion_token": bool(os.environ.get("NOTION_TOKEN")),
                          "workers": WORKERS})
 
@@ -213,6 +221,14 @@ def brand_list(user: str = Depends(current_user)) -> JSONResponse:
                     "accent": brand.color("accent"),
                     "mark": brand.color("mark")}}
         for brand in brands.BRANDS.values()], "default": brands.DEFAULT})
+
+
+@app.get("/fonts")
+def font_sets(user: str = Depends(current_user)) -> JSONResponse:
+    """Наборы шрифтов, которыми можно набрать документ."""
+    return JSONResponse({"fonts": [
+        {"key": f.key, "title": f.title, "body": f.body, "display": f.display}
+        for f in brands.FONT_SETS.values()]})
 
 
 @app.get("/covers")
@@ -231,14 +247,16 @@ def cover_image(name: str, user: str = Depends(current_user)) -> FileResponse:
                         headers={"Cache-Control": "public, max-age=604800"})
 
 
-@app.get("/logo/{name}.svg")
+@app.get("/logo/{name}")
 def logo(name: str) -> FileResponse:
-    """Вордмарк из брендбука: logo-color или logo-white."""
-    path = core.ASSETS / "logo" / f"{pathlib.Path(name).stem}.svg"
-    if not path.is_file():
-        raise HTTPException(404, "Нет такого логотипа")
-    return FileResponse(path, media_type="image/svg+xml",
-                        headers={"Cache-Control": "public, max-age=604800"})
+    """Логотип бренда: вектор, если он есть в брендбуке, иначе картинка."""
+    stem = pathlib.Path(name).stem
+    for suffix, media in ((".svg", "image/svg+xml"), (".png", "image/png")):
+        path = core.ASSETS / "logo" / f"{stem}{suffix}"
+        if path.is_file():
+            return FileResponse(path, media_type=media,
+                                headers={"Cache-Control": "public, max-age=604800"})
+    raise HTTPException(404, "Нет такого логотипа")
 
 
 @app.get("/fonts.css")
@@ -252,11 +270,17 @@ def fonts(brand: str | None = None) -> FileResponse:
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request,
           session: str | None = Cookie(default=None, alias=auth.COOKIE)):
-    if AUTH.configured and not auth.validate(AUTH, session):
-        return RedirectResponse("/login", status_code=303)
-    if not AUTH.configured and not auth.is_local(_client(request)):
-        raise HTTPException(503, "Сервис не настроен: не задана учётная запись")
-    return HTMLResponse((STATIC / "index.html").read_text(encoding="utf-8"))
+    if AUTH.enabled:
+        if AUTH.configured and not auth.validate(AUTH, session):
+            return RedirectResponse("/login", status_code=303)
+        if not AUTH.configured and not auth.is_local(_client(request)):
+            raise HTTPException(503,
+                                "Сервис не настроен: не задана учётная запись")
+    page = (STATIC / "index.html").read_text(encoding="utf-8")
+    if not AUTH.enabled:
+        page = page.replace('<form method="post" action="/logout">',
+                            '<form method="post" action="/logout" hidden>')
+    return HTMLResponse(page)
 
 
 def _text(value: str) -> str:
@@ -341,6 +365,7 @@ async def convert(
     meta: str | None = Form(None),
     style: str | None = Form(None),
     brand: str | None = Form(None),
+    font: str | None = Form(None),
     format: str | None = Form(None),
     background: str | None = Form(None),
     cover: str | None = Form(None),
@@ -382,6 +407,8 @@ async def convert(
     if style in ("light", "dark"):
         overrides["style"] = style
     overrides["brand"] = brands.get(brand).key
+    if font and font in brands.FONT_SETS:
+        overrides["font"] = font
     if cover in ("0", "false", "off"):
         overrides["cover"] = "false"
     if numbered in ("0", "false", "off"):

@@ -235,7 +235,7 @@ footer{padding:14px 28px;border-top:1px solid var(--n200);background:var(--n0);
 </head>
 <body>
 <header>
-  <img class="wordmark" id="logo" src="/logo/a2data-white.svg" alt="">
+  <img class="wordmark" id="logo" src="/logo/a2data-white" alt="">
   <div class="head-right">
     <form method="post" action="/logout"><button class="exit" type="submit">Выйти</button></form>
   </div>
@@ -395,7 +395,7 @@ function paint(brand) {
   root.setProperty('--blue', brand.colors.accent);
   root.setProperty('--blue-700', brand.colors.accent);
   root.setProperty('--amber', brand.colors.mark);
-  $('logo').src = `/logo/${brand.key}-white.svg`;
+  $('logo').src = `/logo/${brand.key}-white`;
   document.title = brand.name + ' · Документы';
   drawTemplates();
 }
@@ -518,6 +518,16 @@ function markBackground() {
                              && b.dataset.style === $('style').value));
 }
 
+fetch('/fonts').then(r => r.json()).then(data => {
+  (data.fonts || []).forEach(f => {
+    const opt = document.createElement('option');
+    opt.value = f.key;
+    opt.textContent = f.title;
+    $('fontset').appendChild(opt);
+  });
+  restore();
+}).catch(() => {});
+
 fetch('/covers').then(r => r.json()).then(data => {
   restore();
   drawBackgrounds(data.covers || []);
@@ -530,7 +540,7 @@ $('toggle').addEventListener('click', () => {
 });
 
 /* ---------- память настроек ---------- */
-const REMEMBER = ['footer', 'header', 'style', 'background'];
+const REMEMBER = ['footer', 'header', 'style', 'background', 'fontset'];
 function save() {
   try {
     const data = {};
@@ -614,6 +624,7 @@ $('form').addEventListener('submit', async (ev) => {
   body.append('style', $('style').value);
   body.append('format', format);
   body.append('brand', org);
+  if ($('fontset').value) body.append('font', $('fontset').value);
   if ($('background').value) body.append('background', $('background').value);
   if ($('photo').files[0]) body.append('photo', $('photo').files[0]);
   if (!$('cover').checked) body.append('cover', '0');
