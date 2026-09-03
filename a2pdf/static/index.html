@@ -456,7 +456,20 @@ function switchTab(pane) {
   document.querySelectorAll('.tabs button').forEach(x =>
     x.classList.toggle('on', x.dataset.pane === pane));
   document.querySelectorAll('.pane').forEach(p => p.classList.toggle('on', p.id === pane));
+  drawPanel();
   refresh();
+}
+
+/* Схему рисуем только из вкладки «Текст»: у файла и ссылки на входе документ,
+   и шаблоны у него свои. */
+function schemaMode() { return tab === 'pane-text' && textKind === 'mermaid'; }
+
+function drawPanel() {
+  const schema = schemaMode();
+  $('tpl-title').textContent = schema ? 'Шаблон схемы' : 'Шаблон';
+  $('fmt-png').hidden = !schema;
+  if (!schema && format === 'png') setFormat('pdf');
+  if (schema) drawSchemes(); else drawTemplates();
 }
 document.querySelectorAll('.tabs button').forEach(b =>
   b.addEventListener('click', () => switchTab(b.dataset.pane)));
@@ -611,10 +624,7 @@ document.querySelectorAll('.kinds button').forEach(b =>
     document.querySelectorAll('.kinds button').forEach(x =>
       x.classList.toggle('on', x === b));
     const schema = textKind === 'mermaid';
-    $('fmt-png').hidden = !schema;
-    $('tpl-title').textContent = schema ? 'Шаблон схемы' : 'Шаблон';
-    if (schema) drawSchemes(); else drawTemplates();
-    if (!schema && format === 'png') setFormat('pdf');
+    drawPanel();
     $('mdtext').placeholder = schema ? MERMAID_EXAMPLE
       : '# Заголовок\n\nСписки, таблицы, код и блоки ```mermaid — всё соберётся в PDF.';
     refresh();
@@ -702,7 +712,7 @@ $('form').addEventListener('submit', async (ev) => {
   body.append('style', $('style').value);
   body.append('format', format);
   body.append('brand', org);
-  if (textKind === 'mermaid') body.append('scheme', scheme);
+  if (schemaMode()) body.append('scheme', scheme);
   if ($('fontset') && $('fontset').value) body.append('font', $('fontset').value);
   if ($('background').value) body.append('background', $('background').value);
   if ($('photo').files[0]) body.append('photo', $('photo').files[0]);
