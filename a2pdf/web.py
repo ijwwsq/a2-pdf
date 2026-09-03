@@ -40,6 +40,9 @@ TIMEOUT = int(os.environ.get("A2PDF_TIMEOUT", 180))
 RATE_LIMIT = int(os.environ.get("A2PDF_RATE_LIMIT", 60))   # запросов с адреса в минуту
 ALLOWED = {".md", ".markdown", ".docx"}
 PHOTO_TYPES = {".jpg", ".jpeg", ".png", ".webp"}
+MIME = {"pdf": "application/pdf",
+        "docx": "application/vnd.openxmlformats-officedocument"
+                ".wordprocessingml.document"}
 COVERS = core.ASSETS / "covers"          # встроенные фоны обложки
 
 STATIC = pathlib.Path(__file__).resolve().parent / "static"
@@ -165,9 +168,10 @@ def _overrides(**fields: str | None) -> dict:
     return out
 
 
-def _convert(source: dict, overrides: dict, chrome: str) -> tuple[pathlib.Path, str]:
-    """Собирает PDF и возвращает путь и предлагаемое имя файла."""
-    out_path = OUT_DIR / f"{uuid.uuid4().hex}.pdf"
+def _convert(source: dict, overrides: dict, chrome: str,
+             fmt: str = "pdf") -> tuple[pathlib.Path, str]:
+    """Собирает документ и возвращает путь и предлагаемое имя файла."""
+    out_path = OUT_DIR / f"{uuid.uuid4().hex}.{fmt}"
     kind = source["kind"]
 
     if kind == "file" and source["suffix"] == ".docx":
@@ -176,7 +180,8 @@ def _convert(source: dict, overrides: dict, chrome: str) -> tuple[pathlib.Path, 
             raise ValueError("В документе не нашлось текста")
         front.setdefault("title", source["stem"])
         front.update(overrides)
-        core.render_pdf(blocks, front, out_path, chrome=chrome, name=source["stem"])
+        core.render_document(blocks, front, out_path, fmt=fmt, chrome=chrome,
+                             name=source["stem"])
         return out_path, source["stem"]
 
     if kind in ("file", "text"):
@@ -185,7 +190,7 @@ def _convert(source: dict, overrides: dict, chrome: str) -> tuple[pathlib.Path, 
         if not text.strip():
             raise ValueError("Пустой текст")
         core.build_markdown(text, out_path, overrides=overrides, chrome=chrome,
-                            name=source["stem"])
+                            name=source["stem"], fmt=fmt)
         return out_path, source["stem"]
 
     url = source["url"]
@@ -195,7 +200,7 @@ def _convert(source: dict, overrides: dict, chrome: str) -> tuple[pathlib.Path, 
         blocks, front = fetch(url)
     front.update(overrides)
     stem = _safe_stem(str(front.get("title") or "document"))
-    core.render_pdf(blocks, front, out_path, chrome=chrome, name=stem)
+    core.render_document(blocks, front, out_path, fmt=fmt, chrome=chrome, name=stem)
     return out_path, stem
 
 
@@ -215,10 +220,12 @@ async def convert(
     confidential: str | None = Form(None),
     meta: str | None = Form(None),
     style: str | None = Form(None),
+    format: str | None = Form(None),
     background: str | None = Form(None),
     cover: str | None = Form(None),
     numbered: str | None = Form(None),
 ):
+    fmt = "docx" if (format or "").lower() in ("docx", "word") else "pdf"
     client = request.client.host if request.client else "unknown"
     if not _rate_ok(client):
         raise HTTPException(429, "Слишком много запросов, попробуйте через минуту")
@@ -280,7 +287,7 @@ async def convert(
         try:
             out_path, stem = await asyncio.wait_for(
                 loop.run_in_executor(_pool, _convert, source, overrides,
-                                     app.state.chrome),
+                                     app.state.chrome, fmt),
                 timeout=TIMEOUT)
         except asyncio.TimeoutError:
             raise HTTPException(504, "Сборка заняла слишком много времени")
@@ -293,8 +300,8 @@ async def convert(
             if photo_path:
                 photo_path.unlink(missing_ok=True)
 
-    log.info("%s -> %s.pdf, %.1f c, %d KB", source["kind"], stem,
+    log.info("%s -> %s.%s, %.1f c, %d KB", source["kind"], stem, fmt,
              time.monotonic() - started, out_path.stat().st_size // 1024)
     return FileResponse(
-        out_path, media_type="application/pdf", filename=f"{stem}.pdf",
+        out_path, media_type=MIME[fmt], filename=f"{stem}.{fmt}",
         background=BackgroundTask(out_path.unlink, missing_ok=True))

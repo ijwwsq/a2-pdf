@@ -1,15 +1,19 @@
-# a2pdf — фирменные PDF из markdown, Word и Notion
+# a2pdf — фирменные документы из markdown, Word и Notion
 
 Сервис и CLI, которые превращают `.md`, `.docx`, вставленный markdown или
-ссылку на страницу Notion в PDF в оформлении A2DATA: обложка, колонтитулы
+ссылку на страницу Notion в документ в оформлении A2DATA: обложка, колонтитулы
 с нумерацией страниц, диаграммы mermaid в фирменной палитре, встроенные
 шрифты Inter и JetBrains Mono.
+
+На выходе — **PDF** или **Word**. В Word обложка и диаграммы вставляются
+картинками, а текст, списки, таблицы и код остаются редактируемыми.
 
 ```
 a2pdf/
   a2pdf/
     core.py          вёрстка и сборка PDF
     docx_reader.py   чтение .docx
+    docx_writer.py   сборка фирменного .docx
     html_reader.py   HTML в блоки документа
     notion.py        импорт страниц Notion
     fetch.py         загрузка обычных страниц и raw markdown
@@ -68,10 +72,12 @@ curl -X POST http://localhost:8000/convert -F "file=@doc.md" -F "kicker=Комм
 curl -X POST http://localhost:8000/convert -F "url=https://www.notion.so/..." -o doc.pdf
 ```
 
+Формат результата задаёт поле `format`: `pdf` (по умолчанию) или `docx`.
+
 Остальные поля необязательные и перекрывают front matter: `title`, `subtitle`,
 `kicker`, `index`, `header`, `footer`, `confidential`, `meta`
 (строки `Ключ=Значение` через перевод строки или `;`), `style=light|dark`,
-`photo` (файл), `cover=0`, `numbered=0`.
+`background` (имя встроенного фото), `photo` (файл), `cover=0`, `numbered=0`.
 
 ### Ссылки
 
@@ -93,6 +99,12 @@ pip install -r requirements.txt
 
 ```bash
 python -m a2pdf документ.md -o готовый.pdf --kicker "Отчёт" --confidential
+```
+
+Тот же документ в Word — с ключом `--docx`:
+
+```bash
+python -m a2pdf документ.md --docx
 ```
 
 На Windows можно просто перетащить файлы на `md-to-pdf.cmd`.
@@ -118,6 +130,11 @@ a2pdf.build_any(pathlib.Path("документ.docx"), pathlib.Path("out.pdf"),
 таблицы, разделители, картинки и вложенные блоки.
 
 Из веб-страницы: то же, что из HTML, — заголовки, текст, списки и таблицы.
+
+### Диаграммы
+
+Блоки ` ```mermaid ` рисуются в фирменной палитре. Высокая схема сжимается
+так, чтобы целиком поместиться на страницу — на части она не разрывается.
 
 ### Обложка
 

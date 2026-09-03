@@ -440,13 +440,15 @@ h1{font-size:34pt;font-weight:700;letter-spacing:-1.4px;line-height:1.08;max-wid
 BODY_CSS = TOKENS + """
 @page{size:A4;margin:24mm 17mm 22mm}
 body{font-size:10.2pt;line-height:1.55}
-.h2-wrap{display:flex;align-items:baseline;gap:3.5mm;margin:9mm 0 3mm;break-after:avoid}
-.h2-wrap:first-child{margin-top:0}
+.h2-wrap{display:flex;align-items:baseline;gap:3.5mm;margin:9mm 0 3.5mm;
+         padding-top:3mm;border-top:.25mm solid var(--n200);break-after:avoid}
+.h2-wrap:first-child{margin-top:0;padding-top:0;border-top:0}
 .eyebrow{font-family:var(--mono);font-size:8pt;font-weight:700;color:var(--blue);
          letter-spacing:.5px}
 h2{font-size:15.5pt;font-weight:700;color:var(--navy);letter-spacing:-.4px;line-height:1.2}
-h3{font-size:10.6pt;font-weight:600;color:var(--n900);margin:5mm 0 2mm;break-after:avoid}
-p{margin:0 0 3mm}
+h3{font-size:10.6pt;font-weight:600;color:var(--n900);margin:5mm 0 2mm;
+   break-after:avoid;break-inside:avoid}
+p{margin:0 0 3mm;orphans:2;widows:2}
 strong{color:var(--n900);font-weight:600}
 code,pre.code code{font-variant-ligatures:none;font-feature-settings:"liga" 0,"calt" 0}
 code{font-family:var(--mono);font-size:8.6pt;background:var(--navy-50);color:var(--navy);
@@ -471,11 +473,14 @@ pre.code{background:var(--n50);border:.25mm solid var(--n200);
 pre.code code{font-family:var(--mono);font-size:8.4pt;line-height:1.55;background:none;
               border:0;padding:0;color:var(--n900);white-space:pre-wrap;
               word-break:break-word}
-table{width:100%;border-collapse:collapse;margin:0 0 4mm;font-size:9pt;break-inside:avoid}
+table{width:100%;border-collapse:collapse;margin:0 0 4mm;font-size:9pt}
+thead{display:table-header-group}   /* шапка повторяется на каждой странице */
+tr{break-inside:avoid}
 th{background:var(--navy);color:#fff;text-align:left;font-weight:600;padding:2.6mm 3mm;
    font-size:8.4pt}
 th strong,th code,th a{color:#fff;background:none;border:0}
-td{padding:2.4mm 3mm;border-bottom:.25mm solid var(--n200);vertical-align:top}
+td{padding:2.4mm 3mm;border-bottom:.25mm solid var(--n200);vertical-align:top;
+   overflow-wrap:anywhere}
 tbody tr:nth-child(even) td{background:var(--n50)}
 .note{border-left:.9mm solid var(--amber);background:var(--amber-50);padding:3.5mm 5mm;
       margin:0 0 4mm;border-radius:0 1.4mm 1.4mm 0;break-inside:avoid}
@@ -483,11 +488,11 @@ tbody tr:nth-child(even) td{background:var(--n50)}
 .dg{border:.25mm solid var(--n200);border-radius:1.6mm;background:var(--n50);padding:5mm;
     margin:0 0 5mm;break-inside:avoid}
 .dg-mermaid{text-align:center;padding:4mm}
-.dg-mermaid svg{max-width:100%;height:auto}
+.dg-mermaid svg{max-width:100%;max-height:198mm;width:auto;height:auto}
 .fig{margin:0 0 5mm;text-align:center;break-inside:avoid}
 .fig img{max-width:100%;max-height:150mm;border-radius:1.4mm}
 .fig-cap{margin:-3mm 0 5mm;padding-left:1mm;font-size:8.4pt;color:var(--n500);
-         break-before:avoid}
+         break-before:avoid;break-inside:avoid}
 .dg-row{margin-bottom:3mm}
 .dg-row:last-of-type{margin-bottom:0}
 .dg-lab{font-size:7.4pt;font-weight:600;text-transform:uppercase;letter-spacing:1.2px;
@@ -677,6 +682,29 @@ def _cover_bg(front: dict) -> str:
     return f' style="--photo:url({src})"' if src else ""
 
 
+def cover_html(front: dict) -> str:
+    """HTML обложки: используется и для PDF, и для картинки в .docx."""
+    ensure_assets(quiet=True)
+    fonts_css = (ASSETS / "fonts.css").read_text(encoding="utf-8")
+    meta_items = list((front.get("meta") or {}).items())
+    spec = "".join(f'<div><div class="k">{html.escape(str(k))}</div>'
+                   f'<div class="v">{html.escape(str(v))}</div></div>'
+                   for k, v in meta_items)
+    return COVER_TPL.format(
+        title=html.escape(str(front.get("title", ""))), fonts=fonts_css,
+        css=COVER_CSS, role=html.escape(str(front.get("role", COMPANY))),
+        chip=(f'<div class="chip">{html.escape(str(front["confidential"]))}</div>'
+              if front.get("confidential") else ""),
+        kicker=_kicker(front), style=_cover_class(front),
+        cover_style=_cover_bg(front),
+        title_text=html.escape(str(front.get("title", ""))),
+        subtitle=(f'<div class="sub">{html.escape(str(front["subtitle"]))}</div>'
+                  if front.get("subtitle") else ""),
+        cols=max(1, len(meta_items)) if meta_items else 1, spec=spec,
+        foot_left=html.escape(str(front.get("place", "Almaty, Kazakhstan"))),
+        site=SITE)
+
+
 def _kicker(front: dict) -> str:
     """Строка над заголовком: номер документа и надпись."""
     parts = []
@@ -720,28 +748,10 @@ def render_pdf(blocks: list[tuple], front: dict, out_path: pathlib.Path,
     with_cover = str(front.get("cover", "true")).lower() not in ("false", "0", "no")
     doc = pymupdf.open()
     if with_cover:
-        meta_items = list((front.get("meta") or {}).items())
-        spec = "".join(f'<div><div class="k">{html.escape(str(k))}</div>'
-                       f'<div class="v">{html.escape(str(v))}</div></div>'
-                       for k, v in meta_items)
-        cover_html = TMP / f"{stem}-cover.html"
-        cover_html.write_text(COVER_TPL.format(
-            title=html.escape(str(front["title"])), fonts=fonts_css, css=COVER_CSS,
-            role=html.escape(str(front.get("role", COMPANY))),
-
-            chip=(f'<div class="chip">{html.escape(str(front["confidential"]))}</div>'
-                  if front.get("confidential") else ""),
-            kicker=_kicker(front),
-            style=_cover_class(front), cover_style=_cover_bg(front),
-            title_text=html.escape(str(front["title"])),
-            subtitle=(f'<div class="sub">{html.escape(str(front["subtitle"]))}</div>'
-                      if front.get("subtitle") else ""),
-            cols=max(1, len(meta_items)) if meta_items else 1,
-            spec=spec,
-            foot_left=html.escape(str(front.get("place", "Almaty, Kazakhstan"))),
-            site=SITE), encoding="utf-8")
+        cover_path = TMP / f"{stem}-cover.html"
+        cover_path.write_text(cover_html(front), encoding="utf-8")
         cover_pdf = TMP / f"{stem}-cover.pdf"
-        print_pdf(cover_html, cover_pdf, chrome, 3000)
+        print_pdf(cover_path, cover_pdf, chrome, 3000)
         doc.insert_pdf(pymupdf.open(cover_pdf))
     doc.insert_pdf(pymupdf.open(body_pdf))
 
@@ -757,10 +767,22 @@ def render_pdf(blocks: list[tuple], front: dict, out_path: pathlib.Path,
     return result
 
 
+def render_document(blocks: list[tuple], front: dict, out_path: pathlib.Path,
+                    fmt: str = "pdf", chrome: str | None = None,
+                    name: str = "document") -> pathlib.Path:
+    """Собирает документ в нужном формате: pdf или docx."""
+    if fmt == "docx":
+        from .docx_writer import write_docx  # python-docx нужен только здесь
+
+        return write_docx(blocks, front, out_path, chrome=chrome, name=name)
+    return render_pdf(blocks, front, out_path, chrome=chrome, name=name)
+
+
 def build_markdown(text: str, out_path: pathlib.Path, overrides: dict | None = None,
                    append_texts: list[str] | None = None,
-                   chrome: str | None = None, name: str = "document") -> pathlib.Path:
-    """Собирает PDF из markdown-строки (front matter учитывается)."""
+                   chrome: str | None = None, name: str = "document",
+                   fmt: str = "pdf") -> pathlib.Path:
+    """Собирает документ из markdown-строки (front matter учитывается)."""
     front, body = split_front_matter(text)
     front.update({k: v for k, v in (overrides or {}).items() if v is not None})
     keep_mm = str(front.get("mermaid", "true")).lower() not in (
@@ -769,36 +791,41 @@ def build_markdown(text: str, out_path: pathlib.Path, overrides: dict | None = N
     for extra in append_texts or []:
         _, extra_body = split_front_matter(extra)
         blocks += parse(extra_body, keep_mermaid=keep_mm)
-    return render_pdf(blocks, front, out_path, chrome=chrome, name=name)
+    return render_document(blocks, front, out_path, fmt=fmt, chrome=chrome,
+                           name=name)
 
 
 def build(md_path: pathlib.Path, out_path: pathlib.Path | None = None,
           overrides: dict | None = None,
           append: list[pathlib.Path] | None = None,
-          chrome: str | None = None, quiet: bool = False) -> pathlib.Path:
-    """Собирает PDF из markdown-файла и возвращает путь к результату."""
+          chrome: str | None = None, quiet: bool = False,
+          fmt: str = "pdf") -> pathlib.Path:
+    """Собирает документ из markdown-файла и возвращает путь к результату."""
     ensure_assets(quiet=quiet)
-    out_path = out_path or md_path.with_suffix(".pdf")
+    out_path = out_path or md_path.with_suffix(".docx" if fmt == "docx" else ".pdf")
     result = build_markdown(
         md_path.read_text(encoding="utf-8"), out_path, overrides=overrides,
         append_texts=[p.read_text(encoding="utf-8") for p in (append or [])],
-        chrome=chrome, name=md_path.stem)
+        chrome=chrome, name=md_path.stem, fmt=fmt)
     if not quiet:
-        with pymupdf.open(result) as d:
-            print(f"{result}  —  {d.page_count} стр., "
-                  f"{result.stat().st_size // 1024} KB")
+        _report(result)
     return result
 
 
 def build_any(path: pathlib.Path, out_path: pathlib.Path | None = None,
               overrides: dict | None = None,
               append: list[pathlib.Path] | None = None,
-              chrome: str | None = None, quiet: bool = False) -> pathlib.Path:
-    """Собирает PDF из .md или .docx."""
-    out_path = out_path or path.with_suffix(".pdf")
+              chrome: str | None = None, quiet: bool = False,
+              fmt: str = "pdf") -> pathlib.Path:
+    """Собирает документ из .md или .docx в формате pdf или docx."""
+    suffix = ".docx" if fmt == "docx" else ".pdf"
+    if out_path is None:
+        out_path = path.with_name(path.stem + suffix)
+        if out_path == path:  # docx -> docx: не затираем исходник
+            out_path = path.with_name(path.stem + "-a2data" + suffix)
     if path.suffix.lower() != ".docx":
         return build(path, out_path, overrides=overrides, append=append,
-                     chrome=chrome, quiet=quiet)
+                     chrome=chrome, quiet=quiet, fmt=fmt)
 
     from .docx_reader import docx_to_blocks  # mammoth нужен только для docx
 
@@ -811,12 +838,20 @@ def build_any(path: pathlib.Path, out_path: pathlib.Path | None = None,
     for extra in append or []:
         extra_front, extra_md = split_front_matter(extra.read_text(encoding="utf-8"))
         blocks += parse(extra_md)
-    result = render_pdf(blocks, front, out_path, chrome=chrome, name=path.stem)
+    result = render_document(blocks, front, out_path, fmt=fmt, chrome=chrome,
+                             name=path.stem)
     if not quiet:
-        with pymupdf.open(result) as d:
-            print(f"{result}  —  {d.page_count} стр., "
-                  f"{result.stat().st_size // 1024} KB")
+        _report(result)
     return result
+
+
+def _report(path: pathlib.Path) -> None:
+    size = path.stat().st_size // 1024
+    if path.suffix.lower() == ".pdf":
+        with pymupdf.open(path) as doc:
+            print(f"{path}  —  {doc.page_count} стр., {size} KB")
+    else:
+        print(f"{path}  —  {size} KB")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -847,6 +882,8 @@ def main(argv: list[str] | None = None) -> None:
                     help="не нумеровать разделы")
     ap.add_argument("--append", action="append", default=[], type=pathlib.Path,
                     help="дописать в конец ещё один md")
+    ap.add_argument("--docx", action="store_true",
+                    help="собрать .docx вместо PDF")
     ap.add_argument("--photo", help="фото на обложку: путь к файлу или ссылка")
     ap.add_argument("--style", choices=("dark", "light"),
                     help="цвет обложки: синяя (dark) или светлая")
@@ -872,6 +909,7 @@ def main(argv: list[str] | None = None) -> None:
 
     chrome = find_chrome()
 
+    fmt = "docx" if args.docx else "pdf"
     files = [f for f in args.files
              if f.suffix.lower() in (".md", ".markdown", ".docx")]
     if not files:
@@ -882,7 +920,7 @@ def main(argv: list[str] | None = None) -> None:
             out = args.out / f.with_suffix(".pdf").name if (
                 len(files) > 1 or args.out.is_dir()) else args.out
         build_any(f, out, overrides=overrides, append=args.append,
-                  chrome=chrome)
+                  chrome=chrome, fmt=fmt)
 
 
 if __name__ == "__main__":

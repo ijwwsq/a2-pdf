@@ -162,6 +162,12 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--blue);
 .upload:hover{border-color:var(--blue);color:var(--navy)}
 .upload-name{font-size:12px;color:var(--n500);margin-left:10px}
 
+.formats{display:flex;gap:2px;background:var(--n100);padding:3px;
+  border-radius:var(--r-md);width:fit-content;margin-top:16px}
+.formats button{border:0;background:none;font:600 12.5px var(--font);
+  color:var(--n500);padding:6px 16px;border-radius:6px;cursor:pointer}
+.formats button.on{background:var(--n0);color:var(--navy);box-shadow:var(--sh-sm)}
+
 .go{display:flex;align-items:center;gap:12px;margin-top:14px}
 button.primary{background:var(--navy);color:#fff;border:0;border-radius:var(--r-md);
   padding:12px 24px;font:600 14.5px var(--font);cursor:pointer;transition:background .15s}
@@ -327,6 +333,11 @@ footer{padding:14px 28px;border-top:1px solid var(--n200);background:var(--n0);
         </div>
       </div>
 
+      <div class="formats">
+        <button type="button" class="fmt on" data-fmt="pdf">PDF</button>
+        <button type="button" class="fmt" data-fmt="docx">Word</button>
+      </div>
+
       <div class="go">
         <button class="primary" id="submit" type="submit" disabled>Собрать PDF</button>
         <span class="kbd">Ctrl+Enter</span>
@@ -358,7 +369,16 @@ footer{padding:14px 28px;border-top:1px solid var(--n200);background:var(--n0);
 const $ = (id) => document.getElementById(id);
 const fileInput = $('file'), drop = $('drop'), chosen = $('chosen'), status = $('status');
 let tab = 'pane-file';
+let format = 'pdf';
 let lastUrl = null;
+
+document.querySelectorAll('.formats button').forEach(b =>
+  b.addEventListener('click', () => {
+    format = b.dataset.fmt;
+    document.querySelectorAll('.formats button').forEach(x =>
+      x.classList.toggle('on', x === b));
+    $('submit').textContent = format === 'docx' ? 'Собрать Word' : 'Собрать PDF';
+  }));
 
 /* ---------- источник ---------- */
 function switchTab(pane) {
@@ -543,6 +563,7 @@ $('form').addEventListener('submit', async (ev) => {
   ['title','subtitle','kicker','index','header','footer','confidential','meta']
     .forEach(k => { const v = $(k).value.trim(); if (v) body.append(k, v); });
   body.append('style', $('style').value);
+  body.append('format', format);
   if ($('background').value) body.append('background', $('background').value);
   if ($('photo').files[0]) body.append('photo', $('photo').files[0]);
   if (!$('cover').checked) body.append('cover', '0');
@@ -562,9 +583,11 @@ $('form').addEventListener('submit', async (ev) => {
     const blob = await res.blob();
     const cd = res.headers.get('Content-Disposition') || '';
     const guess = decodeURIComponent((cd.match(/filename\*?=(?:UTF-8'')?"?([^";]+)/) || [])[1] || '');
-    const name = (tab === 'pane-file' && fileInput.files[0])
-      ? fileInput.files[0].name.replace(/\.(md|markdown|docx)$/i, '') + '.pdf'
-      : (guess || ($('title').value.trim() || 'document') + '.pdf');
+    const ext = format === 'docx' ? '.docx' : '.pdf';
+    const base = (tab === 'pane-file' && fileInput.files[0])
+      ? fileInput.files[0].name.replace(/\.(md|markdown|docx)$/i, '')
+      : ($('title').value.trim() || '');
+    const name = base ? base + ext : (guess || 'document' + ext);
 
     if (lastUrl) URL.revokeObjectURL(lastUrl);
     lastUrl = URL.createObjectURL(blob);
@@ -574,9 +597,21 @@ $('form').addEventListener('submit', async (ev) => {
     $('rdl').href = lastUrl; $('rdl').download = name; $('rdl').hidden = false;
     $('ropen').hidden = false;
     $('ropen').onclick = () => window.open(lastUrl, '_blank');
-    $('empty').style.display = 'none';
-    $('rframe').src = lastUrl + '#view=FitH';
-    $('rframe').classList.add('show');
+    if (format === 'docx') {
+      $('rframe').classList.remove('show');
+      $('rframe').removeAttribute('src');
+      $('empty').style.display = '';
+      $('empty').innerHTML =
+        '<svg viewBox="0 0 24 24"><path d="M14 3v4a1 1 0 0 0 1 1h4"/>' +
+        '<path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/>' +
+        '</svg><b>Документ Word готов</b>' +
+        '<span>Предпросмотр доступен только для PDF — скачайте файл ' +
+        'и откройте в Word.</span>';
+    } else {
+      $('empty').style.display = 'none';
+      $('rframe').src = lastUrl + '#view=FitH';
+      $('rframe').classList.add('show');
+    }
     status.textContent = 'Готово';
     status.className = 'status ok';
   } catch (e) {

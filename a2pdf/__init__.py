@@ -8,10 +8,11 @@ from .core import (  # noqa: F401
     find_chrome,
     parse,
     render,
+    render_document,
     render_pdf,
     split_front_matter,
 )
 
-__all__ = ["build", "build_any", "build_markdown", "render_pdf", "parse", "render",
+__all__ = ["build", "build_any", "build_markdown", "render_pdf", "render_document", "parse", "render",
            "split_front_matter", "ensure_assets", "find_chrome", "ASSETS"]
 __version__ = "1.0.0"
