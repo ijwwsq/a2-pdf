@@ -30,9 +30,7 @@ svg{stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;
 header{background:var(--navy);color:#fff;padding:16px 28px;display:flex;
        align-items:center;justify-content:space-between;
        border-bottom:3px solid var(--amber);flex:none}
-/* вордмарк как в брендбуке: A2 и DATA — единый блок, DATA цветом бренда */
-.wordmark{font-weight:800;font-size:19px;letter-spacing:-.9px;line-height:1;color:#fff}
-.wordmark i{font-style:normal;color:var(--blue)}
+.wordmark{height:16px;width:auto;display:block}
 .eyebrow{font-family:var(--mono);font-size:10.5px;font-weight:500;letter-spacing:1.6px;
          text-transform:uppercase;color:#86A2D4}
 
@@ -224,7 +222,7 @@ footer{padding:14px 28px;border-top:1px solid var(--n200);background:var(--n0);
 </head>
 <body>
 <header>
-  <div class="wordmark">A2<i>DATA</i></div>
+  <img class="wordmark" src="/logo/logo-white.svg" alt="A2DATA">
   <div class="eyebrow">Документы</div>
 </header>
 

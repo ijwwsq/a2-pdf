@@ -128,6 +128,16 @@ def cover_image(name: str) -> FileResponse:
                         headers={"Cache-Control": "public, max-age=604800"})
 
 
+@app.get("/logo/{name}.svg")
+def logo(name: str) -> FileResponse:
+    """Вордмарк из брендбука: logo-color или logo-white."""
+    path = core.ASSETS / "logo" / f"{pathlib.Path(name).stem}.svg"
+    if not path.is_file():
+        raise HTTPException(404, "Нет такого логотипа")
+    return FileResponse(path, media_type="image/svg+xml",
+                        headers={"Cache-Control": "public, max-age=604800"})
+
+
 @app.get("/fonts.css")
 def fonts() -> FileResponse:
     """Те же Inter и JetBrains Mono, что уходят в PDF, — без внешних CDN."""

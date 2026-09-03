@@ -409,8 +409,8 @@ body{width:210mm;height:296.5mm;overflow:hidden}
   background:var(--amber);z-index:2}
 
 .top{display:flex;justify-content:space-between;align-items:baseline;padding-top:8mm}
-.wordmark{font-size:17pt;font-weight:800;letter-spacing:-.8px;line-height:1;color:var(--strong)}
-.wordmark i{font-style:normal;color:var(--blue)}
+.wordmark{width:25mm;line-height:0}
+.wordmark svg{width:100%;height:auto;display:block}
 .top .role{font-family:var(--mono);font-size:7.4pt;letter-spacing:2px;
            text-transform:uppercase;color:var(--muted)}
 
@@ -440,12 +440,12 @@ h1{font-size:34pt;font-weight:700;letter-spacing:-1.4px;line-height:1.08;max-wid
 BODY_CSS = TOKENS + """
 @page{size:A4;margin:24mm 17mm 22mm}
 body{font-size:10.2pt;line-height:1.55}
-.h2-wrap{display:flex;align-items:baseline;gap:3.5mm;margin:9mm 0 3.5mm;
-         padding-top:3mm;border-top:.25mm solid var(--n200);break-after:avoid}
+.h2-wrap{display:flex;align-items:baseline;gap:3.5mm;margin:10mm 0 4mm;
+         padding-top:3.5mm;border-top:.25mm solid var(--n200);break-after:avoid}
 .h2-wrap:first-child{margin-top:0;padding-top:0;border-top:0}
 .eyebrow{font-family:var(--mono);font-size:8pt;font-weight:700;color:var(--blue);
          letter-spacing:.5px}
-h2{font-size:15.5pt;font-weight:700;color:var(--navy);letter-spacing:-.4px;line-height:1.2}
+h2{font-size:15pt;font-weight:700;color:var(--navy);letter-spacing:-.5px;line-height:1.2}
 h3{font-size:10.6pt;font-weight:600;color:var(--n900);margin:5mm 0 2mm;
    break-after:avoid;break-inside:avoid}
 p{margin:0 0 3mm;orphans:2;widows:2}
@@ -468,31 +468,31 @@ ol>li::before{content:counter(ol,decimal-leading-zero);position:absolute;left:0;
 .strip i{display:block;font-style:normal;font-size:7pt;letter-spacing:1.4px;
          text-transform:uppercase;color:var(--n400);margin-bottom:.8mm}
 pre.code{background:var(--n50);border:.25mm solid var(--n200);
-         border-left:.9mm solid var(--blue);border-radius:1.4mm;padding:4mm 5mm;
-         margin:0 0 4mm;break-inside:auto}
+         border-left:.9mm solid var(--blue);border-radius:2mm;padding:4.5mm 5.5mm;
+         margin:0 0 4.5mm;break-inside:auto}
 pre.code code{font-family:var(--mono);font-size:8.4pt;line-height:1.55;background:none;
               border:0;padding:0;color:var(--n900);white-space:pre-wrap;
               word-break:break-word}
 table{width:100%;border-collapse:collapse;margin:0 0 4mm;font-size:9pt}
 thead{display:table-header-group}   /* шапка повторяется на каждой странице */
 tr{break-inside:avoid}
-th{background:var(--navy);color:#fff;text-align:left;font-weight:600;padding:2.6mm 3mm;
-   font-size:8.4pt}
+th{background:var(--navy);color:#fff;text-align:left;font-weight:600;padding:3mm 3.2mm;
+   font-size:8.4pt;letter-spacing:.2px}
 th strong,th code,th a{color:#fff;background:none;border:0}
-td{padding:2.4mm 3mm;border-bottom:.25mm solid var(--n200);vertical-align:top;
-   overflow-wrap:anywhere}
+td{padding:2.8mm 3.2mm;border-bottom:.25mm solid var(--n100);vertical-align:top;
+   overflow-wrap:anywhere;line-height:1.45}
 tbody tr:nth-child(even) td{background:var(--n50)}
-.note{border-left:.9mm solid var(--amber);background:var(--amber-50);padding:3.5mm 5mm;
-      margin:0 0 4mm;border-radius:0 1.4mm 1.4mm 0;break-inside:avoid}
+.note{border-left:.9mm solid var(--amber);background:var(--amber-50);padding:4mm 5.5mm;
+      margin:0 0 4.5mm;border-radius:0 2mm 2mm 0;break-inside:avoid}
 .note p{margin:0;font-size:9.4pt}
-.dg{border:.25mm solid var(--n200);border-radius:1.6mm;background:var(--n50);padding:5mm;
+.dg{border:.25mm solid var(--n200);border-radius:2mm;background:var(--n0);padding:6mm;
     margin:0 0 5mm;break-inside:avoid}
 .dg-mermaid{text-align:center;padding:4mm}
 .dg-mermaid svg{max-width:100%;max-height:198mm;width:auto;height:auto}
 .fig{margin:0 0 5mm;text-align:center;break-inside:avoid}
 .fig img{max-width:100%;max-height:150mm;border-radius:1.4mm}
-.fig-cap{margin:-3mm 0 5mm;padding-left:1mm;font-size:8.4pt;color:var(--n500);
-         break-before:avoid;break-inside:avoid}
+.fig-cap{margin:-3.5mm 0 5mm;text-align:center;font-size:8.4pt;font-style:italic;
+         color:var(--n500);break-before:avoid;break-inside:avoid}
 .dg-row{margin-bottom:3mm}
 .dg-row:last-of-type{margin-bottom:0}
 .dg-lab{font-size:7.4pt;font-weight:600;text-transform:uppercase;letter-spacing:1.2px;
@@ -555,7 +555,7 @@ COVER_TPL = """<!doctype html>
   <div class="tint"></div>
   <div class="mark"></div>
   <div class="top">
-    <div class="wordmark">A2<i>DATA</i></div>
+    <div class="wordmark">{logo}</div>
     <div class="role">{role}</div>
   </div>
   <div class="mid">
@@ -628,9 +628,15 @@ def stamp(doc: pymupdf.Document, header_right: str, footer_left: str,
         top_y, bot_y = 13 * MM, h - 11.5 * MM
 
         navy_tw, blue_tw, gray_tw = (pymupdf.TextWriter(page.rect) for _ in range(3))
-        navy_tw.append((left, top_y), "A2", font=bold, fontsize=8)
-        blue_tw.append((left + bold.text_length("A2", 8), top_y), "DATA",
-                       font=bold, fontsize=8)
+        logo = LOGO_DIR / "logo-color.png"
+        if logo.is_file():
+            page.insert_image(pymupdf.Rect(left, top_y - 6.6, left + 26.5,
+                                           top_y + 1.4),
+                              filename=str(logo), keep_proportion=True)
+        else:
+            navy_tw.append((left, top_y), "A2", font=bold, fontsize=8)
+            blue_tw.append((left + bold.text_length("A2", 8), top_y), "DATA",
+                           font=bold, fontsize=8)
         if header_right:
             gray_tw.append((right - reg.text_length(header_right, 7.5), top_y),
                            header_right, font=reg, fontsize=7.5)
@@ -682,6 +688,15 @@ def _cover_bg(front: dict) -> str:
     return f' style="--photo:url({src})"' if src else ""
 
 
+LOGO_DIR = ASSETS / "logo"
+
+
+def logo_svg(on_dark: bool) -> str:
+    """Вордмарк из брендбука: буквы в кривых, поэтому шрифт не нужен."""
+    path = LOGO_DIR / ("logo-white.svg" if on_dark else "logo-color.svg")
+    return path.read_text(encoding="utf-8") if path.is_file() else ""
+
+
 def cover_html(front: dict) -> str:
     """HTML обложки: используется и для PDF, и для картинки в .docx."""
     ensure_assets(quiet=True)
@@ -695,6 +710,8 @@ def cover_html(front: dict) -> str:
         css=COVER_CSS, role=html.escape(str(front.get("role", COMPANY))),
         chip=(f'<div class="chip">{html.escape(str(front["confidential"]))}</div>'
               if front.get("confidential") else ""),
+        logo=logo_svg(str(front.get("style", "dark")).lower() != "light"
+                      or bool(front.get("photo"))),
         kicker=_kicker(front), style=_cover_class(front),
         cover_style=_cover_bg(front),
         title_text=html.escape(str(front.get("title", ""))),
