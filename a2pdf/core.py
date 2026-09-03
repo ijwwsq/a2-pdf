@@ -50,15 +50,15 @@ import urllib.request
 
 import pymupdf
 
+from . import brands
+
 HERE = pathlib.Path(__file__).resolve().parent
 ASSETS = pathlib.Path(os.environ.get("A2PDF_ASSETS") or HERE / "assets")
 TMP = pathlib.Path(os.environ.get("A2PDF_TMP") or HERE / ".build")
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
-GOOGLE_FONTS = ("https://fonts.googleapis.com/css2?"
-                "family=Inter:wght@400;500;600;700;800"
-                "&family=JetBrains+Mono:wght@400;500&display=swap")
+GOOGLE_FONTS = "https://fonts.googleapis.com/css2?family={query}&display=swap"
 INTER_ZIP = "https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip"
 MERMAID_JS = "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"
 FONT_SUBSETS = ("latin", "latin-ext", "cyrillic")
@@ -88,15 +88,21 @@ def _get(url: str) -> bytes:
         return resp.read()
 
 
+def fonts_css_path(brand_key: str = brands.DEFAULT) -> pathlib.Path:
+    return ASSETS / f"fonts-{brand_key}.css"
+
+
 def ensure_assets(quiet: bool = False) -> None:
-    """Скачивает шрифты и mermaid при первом запуске."""
+    """Скачивает шрифты каждого бренда и mermaid при первом запуске."""
     ASSETS.mkdir(parents=True, exist_ok=True)
     say = (lambda *a: None) if quiet else print
 
-    css = ASSETS / "fonts.css"
-    if not css.exists():
-        say("Скачиваю шрифты Inter и JetBrains Mono…")
-        raw = _get(GOOGLE_FONTS).decode("utf-8")
+    for brand in brands.BRANDS.values():
+        css = fonts_css_path(brand.key)
+        if css.exists():
+            continue
+        say(f"Скачиваю шрифты бренда {brand.name}…")
+        raw = _get(GOOGLE_FONTS.format(query=brand.fonts.query)).decode("utf-8")
         faces, seen = [], set()
         for subset, block in re.findall(
                 r"/\*\s*([\w-]+)\s*\*/\s*(@font-face\s*\{[^}]+\})", raw):
@@ -363,39 +369,29 @@ def render(blocks: list[tuple], numbered: bool = True,
 # Стили
 # --------------------------------------------------------------------------- #
 
-TOKENS = """
-:root{
-  --navy:#0B2660; --navy-900:#06173B; --navy-50:#F2F5FA; --navy-100:#E3EAF4;
-  --blue:#1FA8FC; --blue-700:#1289D5; --blue-50:#F1F8FF;
-  --amber:#FF9F1C; --amber-50:#FFF8EC;
-  --n0:#FFFFFF; --n50:#F7F8FA; --n100:#EFF1F4; --n200:#E1E4EA;
-  --n400:#9CA3AF; --n500:#6B7280; --n700:#374151; --n900:#111722;
-  --font:'Inter','Segoe UI',Arial,sans-serif;
-  --mono:'JetBrains Mono','Cascadia Mono',Consolas,monospace;
-}
+BASE = """
 *{box-sizing:border-box;margin:0;padding:0}
 html{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 body{font-family:var(--font);color:var(--n700);font-variant-numeric:tabular-nums}
 """
 
-COVER_CSS = TOKENS + """
+COVER_CSS = BASE + """
 @page{size:A4;margin:0}
 body{width:210mm;height:296.5mm;overflow:hidden}
 .cover{position:relative;width:210mm;height:296.5mm;padding:26mm 24mm 22mm;
        display:flex;flex-direction:column;justify-content:space-between;overflow:hidden;
-       background:var(--navy);color:#fff;
-       --line:rgba(255,255,255,.20); --muted:#8FA6CE; --strong:#fff}
+       background:var(--brand);color:#fff;
+       --line:rgba(255,255,255,.20); --muted:var(--muted-on-dark); --strong:#fff}
 /* мягкое свечение в углу, чтобы синий не был плоским */
 .cover::after{content:"";position:absolute;top:-80mm;right:-60mm;width:200mm;height:200mm;
-  border-radius:50%;
-  background:radial-gradient(circle,rgba(31,168,252,.34) 0,rgba(31,168,252,0) 62%)}
+  border-radius:50%;background:var(--cover-glow)}
 
 /* обложка с фотографией: дуотон — осветлённый ч/б снимок под синим слоем */
 .cover.photo::after{display:none}
 
 /* светлый вариант */
-.cover.light{background:var(--n0);color:var(--navy);
-       --line:var(--n200); --muted:var(--n500); --strong:var(--navy)}
+.cover.light{background:var(--n0);color:var(--brand);
+       --line:var(--n200); --muted:var(--n500); --strong:var(--brand)}
 .cover.light::after{display:none}
 
 .cover>*{position:relative;z-index:1}
@@ -403,10 +399,9 @@ body{width:210mm;height:296.5mm;overflow:hidden}
 .cover>.bg,.cover>.tint{position:absolute;inset:0;display:none;z-index:0}
 .cover.photo>.bg{display:block;background-image:var(--photo);background-size:cover;
   background-position:center;filter:grayscale(1) brightness(1.45) contrast(.95)}
-.cover.photo>.tint{display:block;mix-blend-mode:multiply;
-  background:linear-gradient(155deg,rgba(11,38,96,.80) 0%,rgba(6,23,59,.95) 82%)}
+.cover.photo>.tint{display:block;mix-blend-mode:multiply;background:var(--cover-tint)}
 .cover>.mark{position:absolute;left:24mm;top:26mm;width:18mm;height:1mm;
-  background:var(--amber);z-index:2}
+  background:var(--mark);z-index:2}
 
 .top{display:flex;justify-content:space-between;align-items:baseline;padding-top:8mm}
 .wordmark{width:25mm;line-height:0}
@@ -416,13 +411,14 @@ body{width:210mm;height:296.5mm;overflow:hidden}
 
 .mid{padding-bottom:6mm}
 .kick{font-family:var(--mono);font-size:8pt;letter-spacing:2.4px;text-transform:uppercase;
-      color:var(--blue);margin-bottom:8mm;display:flex;gap:3mm}
+      color:var(--accent);margin-bottom:8mm;display:flex;gap:3mm}
 .kick .num{color:var(--muted)}
-h1{font-size:34pt;font-weight:700;letter-spacing:-1.4px;line-height:1.08;max-width:152mm;
+h1{font-family:var(--display);font-size:34pt;font-weight:var(--display-weight);
+   letter-spacing:var(--display-tracking);line-height:1.08;max-width:152mm;
    color:var(--strong);overflow-wrap:anywhere}
 .sub{font-size:12pt;line-height:1.5;color:var(--muted);margin-top:7mm;max-width:122mm;
      font-weight:400}
-.chip{display:inline-block;border:.25mm solid var(--amber);color:var(--amber);
+.chip{display:inline-block;border:.25mm solid var(--mark);color:var(--mark);
       font-size:7.4pt;font-weight:600;letter-spacing:1.4px;text-transform:uppercase;
       padding:1.6mm 3.4mm;border-radius:1mm;margin-bottom:7mm}
 .cover.light .chip{color:var(--amber-700)}
@@ -437,38 +433,39 @@ h1{font-size:34pt;font-weight:700;letter-spacing:-1.4px;line-height:1.08;max-wid
 .foot .site{color:var(--strong)}
 """
 
-BODY_CSS = TOKENS + """
+BODY_CSS = BASE + """
 @page{size:A4;margin:24mm 17mm 22mm}
 body{font-size:10.2pt;line-height:1.55}
 .h2-wrap{display:flex;align-items:baseline;gap:3.5mm;margin:10mm 0 4mm;
          padding-top:3.5mm;border-top:.25mm solid var(--n200);break-after:avoid}
 .h2-wrap:first-child{margin-top:0;padding-top:0;border-top:0}
-.eyebrow{font-family:var(--mono);font-size:8pt;font-weight:700;color:var(--blue);
+.eyebrow{font-family:var(--mono);font-size:8pt;font-weight:700;color:var(--accent);
          letter-spacing:.5px}
-h2{font-size:15pt;font-weight:700;color:var(--navy);letter-spacing:-.5px;line-height:1.2}
+h2{font-family:var(--display);font-size:15pt;font-weight:var(--display-weight);
+   color:var(--brand);letter-spacing:var(--display-tracking);line-height:1.2}
 h3{font-size:10.6pt;font-weight:600;color:var(--n900);margin:5mm 0 2mm;
    break-after:avoid;break-inside:avoid}
 p{margin:0 0 3mm;orphans:2;widows:2}
 strong{color:var(--n900);font-weight:600}
 code,pre.code code{font-variant-ligatures:none;font-feature-settings:"liga" 0,"calt" 0}
-code{font-family:var(--mono);font-size:8.6pt;background:var(--navy-50);color:var(--navy);
-     padding:.3mm 1.2mm;border-radius:.8mm;border:.2mm solid var(--navy-100)}
+code{font-family:var(--mono);font-size:8.6pt;background:var(--brand-50);color:var(--brand);
+     padding:.3mm 1.2mm;border-radius:.8mm;border:.2mm solid var(--brand-100)}
 ul,ol{margin:0 0 4mm;padding:0;list-style:none}
 li{position:relative;padding-left:8mm;margin-bottom:1.6mm;break-inside:avoid}
 ul>li::before{content:"";position:absolute;left:2.5mm;top:2.1mm;width:1.3mm;height:1.3mm;
-              background:var(--blue);border-radius:.3mm}
+              background:var(--accent);border-radius:.3mm}
 ol{counter-reset:ol}
 ol>li{counter-increment:ol}
 ol>li::before{content:counter(ol,decimal-leading-zero);position:absolute;left:0;top:.6mm;
-              font-family:var(--mono);font-size:7.6pt;font-weight:700;color:var(--blue-700)}
+              font-family:var(--mono);font-size:7.6pt;font-weight:700;color:var(--accent-dark)}
 .rule{height:.25mm;background:var(--n200);margin:8mm 0}
-.strip{display:flex;gap:9mm;border-top:.5mm solid var(--navy);
+.strip{display:flex;gap:9mm;border-top:.5mm solid var(--brand);
        border-bottom:.25mm solid var(--n200);padding:2.5mm 0;margin:0 0 6mm}
 .strip span{font-size:9pt;color:var(--n900)}
 .strip i{display:block;font-style:normal;font-size:7pt;letter-spacing:1.4px;
          text-transform:uppercase;color:var(--n400);margin-bottom:.8mm}
 pre.code{background:var(--n50);border:.25mm solid var(--n200);
-         border-left:.9mm solid var(--blue);border-radius:2mm;padding:4.5mm 5.5mm;
+         border-left:.9mm solid var(--accent);border-radius:2mm;padding:4.5mm 5.5mm;
          margin:0 0 4.5mm;break-inside:auto}
 pre.code code{font-family:var(--mono);font-size:8.4pt;line-height:1.55;background:none;
               border:0;padding:0;color:var(--n900);white-space:pre-wrap;
@@ -476,13 +473,13 @@ pre.code code{font-family:var(--mono);font-size:8.4pt;line-height:1.55;backgroun
 table{width:100%;border-collapse:collapse;margin:0 0 4mm;font-size:9pt}
 thead{display:table-header-group}   /* шапка повторяется на каждой странице */
 tr{break-inside:avoid}
-th{background:var(--navy);color:#fff;text-align:left;font-weight:600;padding:3mm 3.2mm;
+th{background:var(--brand);color:#fff;text-align:left;font-weight:600;padding:3mm 3.2mm;
    font-size:8.4pt;letter-spacing:.2px}
 th strong,th code,th a{color:#fff;background:none;border:0}
 td{padding:2.8mm 3.2mm;border-bottom:.25mm solid var(--n100);vertical-align:top;
    overflow-wrap:anywhere;line-height:1.45}
 tbody tr:nth-child(even) td{background:var(--n50)}
-.note{border-left:.9mm solid var(--amber);background:var(--amber-50);padding:4mm 5.5mm;
+.note{border-left:.9mm solid var(--mark);background:var(--mark-50);padding:4mm 5.5mm;
       margin:0 0 4.5mm;border-radius:0 2mm 2mm 0;break-inside:avoid}
 .note p{margin:0;font-size:9.4pt}
 .dg{border:.25mm solid var(--n200);border-radius:2mm;background:var(--n0);padding:6mm;
@@ -500,8 +497,8 @@ tbody tr:nth-child(even) td{background:var(--n50)}
 .dg-chain{display:flex;align-items:center;flex-wrap:wrap;gap:2mm}
 .dg-node{display:inline-block;padding:2mm 3.2mm;border-radius:1.4mm;font-size:8.6pt;
          font-weight:500;border:.25mm solid var(--n200);background:#fff;color:var(--n900)}
-.dg-node.dg-a{background:var(--navy);border-color:var(--navy);color:#fff;font-weight:600}
-.dg-node.dg-s{background:var(--blue-50);border-color:#BFE3FF;color:var(--blue-700);
+.dg-node.dg-a{background:var(--brand);border-color:var(--brand);color:#fff;font-weight:600}
+.dg-node.dg-s{background:var(--accent-50);border-color:#BFE3FF;color:var(--accent-dark);
               font-weight:600}
 .dg-arrow{color:var(--n400);font-size:10pt;line-height:1}
 .dg-fan{display:inline-flex;flex-direction:column;gap:1.2mm}
@@ -512,40 +509,56 @@ tbody tr:nth-child(even) td{background:var(--n50)}
 .dg-steps{display:flex;flex-direction:column;gap:1.6mm}
 .dg-step{display:flex;align-items:baseline;gap:3mm;font-size:8.8pt}
 .dg-num{flex:none;font-family:var(--mono);font-size:7.4pt;font-weight:700;
-        color:var(--blue-700)}
-.dg-actor{flex:none;width:26mm;font-weight:600;color:var(--navy)}
+        color:var(--accent-dark)}
+.dg-actor{flex:none;width:26mm;font-weight:600;color:var(--brand)}
 .dg-act{color:var(--n700)}
 .dg-act code{font-size:8pt}
-.part{margin:11mm 0 6mm;padding-top:4mm;border-top:.5mm solid var(--navy);
+.part{margin:11mm 0 6mm;padding-top:4mm;border-top:.5mm solid var(--brand);
       break-after:avoid;break-inside:avoid;display:flex;align-items:baseline;gap:4mm}
 .part .lbl{font-family:var(--mono);font-size:7.6pt;font-weight:700;letter-spacing:1.4px;
-           text-transform:uppercase;color:var(--amber)}
-.part .ttl{font-size:13pt;font-weight:700;color:var(--navy);letter-spacing:-.3px}
+           text-transform:uppercase;color:var(--mark)}
+.part .ttl{font-size:13pt;font-weight:700;color:var(--brand);letter-spacing:-.3px}
 """
 
-MERMAID_INIT = """
+def mermaid_init(brand: brands.Brand) -> str:
+    """Тема mermaid в цветах бренда."""
+    color = brand.color
+    return """
 mermaid.initialize({
   startOnLoad:false, theme:'base', securityLevel:'loose',
   flowchart:{curve:'basis',htmlLabels:true,useMaxWidth:true},
   sequence:{useMaxWidth:true,actorMargin:40,width:150},
   themeVariables:{
-    fontFamily:"Inter, 'Segoe UI', sans-serif", fontSize:'13px',
-    primaryColor:'#F1F8FF', primaryBorderColor:'#1FA8FC', primaryTextColor:'#0B2660',
-    secondaryColor:'#F7F8FA', tertiaryColor:'#FFF8EC',
-    lineColor:'#6B7280', textColor:'#374151',
-    mainBkg:'#F1F8FF', nodeBorder:'#1FA8FC', clusterBkg:'#F7F8FA',
-    clusterBorder:'#E1E4EA', edgeLabelBackground:'#FFFFFF',
-    actorBkg:'#0B2660', actorBorder:'#0B2660', actorTextColor:'#FFFFFF',
-    actorLineColor:'#9CA3AF', signalColor:'#374151', signalTextColor:'#374151',
-    labelBoxBkgColor:'#FFF8EC', labelBoxBorderColor:'#FF9F1C',
-    labelTextColor:'#0B2660', loopTextColor:'#374151',
-    noteBkgColor:'#FFF8EC', noteBorderColor:'#FF9F1C', noteTextColor:'#0B2660',
-    altBackground:'#F7F8FA'
+    fontFamily:"%(body)s, 'Segoe UI', sans-serif", fontSize:'13px',
+    primaryColor:'%(accent_50)s', primaryBorderColor:'%(accent)s',
+    primaryTextColor:'%(brand)s',
+    secondaryColor:'%(n50)s', tertiaryColor:'%(mark_50)s',
+    lineColor:'%(n500)s', textColor:'%(n700)s',
+    mainBkg:'%(accent_50)s', nodeBorder:'%(accent)s', clusterBkg:'%(n50)s',
+    clusterBorder:'%(n200)s', edgeLabelBackground:'#FFFFFF',
+    actorBkg:'%(brand)s', actorBorder:'%(brand)s', actorTextColor:'#FFFFFF',
+    actorLineColor:'%(n400)s', signalColor:'%(n700)s',
+    signalTextColor:'%(n700)s',
+    labelBoxBkgColor:'%(mark_50)s', labelBoxBorderColor:'%(mark)s',
+    labelTextColor:'%(brand)s', loopTextColor:'%(n700)s',
+    noteBkgColor:'%(mark_50)s', noteBorderColor:'%(mark)s',
+    noteTextColor:'%(brand)s', altBackground:'%(n50)s'
   }
 });
 await mermaid.run();
 
-"""
+// Диаграмма должна влезать в страницу целиком: снимаем размеры, которые
+// mermaid проставил инлайном, и ограничиваем высоту доступной областью.
+for (const svg of document.querySelectorAll('.dg-mermaid svg')) {
+  svg.removeAttribute('width');
+  svg.removeAttribute('height');
+  svg.style.maxWidth = '100%%';
+  svg.style.maxHeight = '198mm';
+  svg.style.width = 'auto';
+  svg.style.height = 'auto';
+}
+""" % {"body": brand.fonts.body, **brand.colors, **brand.neutrals}
+
 
 COVER_TPL = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><title>{title}</title>
@@ -671,8 +684,9 @@ def save(doc: pymupdf.Document, pdf_path: pathlib.Path) -> pathlib.Path:
 
 
 def _cover_class(front: dict) -> str:
+    brand = brands.get(front.get("brand"))
     classes = []
-    if str(front.get("style", "dark")).lower() == "light":
+    if str(front.get("style", brand.cover_style)).lower() == "light":
         classes.append("light")
     if front.get("photo"):
         classes.append("photo")
@@ -691,35 +705,38 @@ def _cover_bg(front: dict) -> str:
 LOGO_DIR = ASSETS / "logo"
 
 
-def logo_svg(on_dark: bool) -> str:
+def logo_svg(brand: brands.Brand, on_dark: bool) -> str:
     """Вордмарк из брендбука: буквы в кривых, поэтому шрифт не нужен."""
-    path = LOGO_DIR / ("logo-white.svg" if on_dark else "logo-color.svg")
+    tone = "white" if on_dark else "color"
+    path = LOGO_DIR / f"{brand.logo}-{tone}.svg"
     return path.read_text(encoding="utf-8") if path.is_file() else ""
 
 
 def cover_html(front: dict) -> str:
     """HTML обложки: используется и для PDF, и для картинки в .docx."""
     ensure_assets(quiet=True)
-    fonts_css = (ASSETS / "fonts.css").read_text(encoding="utf-8")
+    brand = brands.get(front.get("brand"))
+    fonts_css = fonts_css_path(brand.key).read_text(encoding="utf-8")
     meta_items = list((front.get("meta") or {}).items())
     spec = "".join(f'<div><div class="k">{html.escape(str(k))}</div>'
                    f'<div class="v">{html.escape(str(v))}</div></div>'
                    for k, v in meta_items)
     return COVER_TPL.format(
         title=html.escape(str(front.get("title", ""))), fonts=fonts_css,
-        css=COVER_CSS, role=html.escape(str(front.get("role", COMPANY))),
+        css=brands.tokens(brand) + COVER_CSS,
+        role=html.escape(str(front.get("role", brand.tagline or brand.name))),
         chip=(f'<div class="chip">{html.escape(str(front["confidential"]))}</div>'
               if front.get("confidential") else ""),
-        logo=logo_svg(str(front.get("style", "dark")).lower() != "light"
-                      or bool(front.get("photo"))),
+        logo=logo_svg(brand, str(front.get("style", brand.cover_style)).lower()
+                      != "light" or bool(front.get("photo"))),
         kicker=_kicker(front), style=_cover_class(front),
         cover_style=_cover_bg(front),
         title_text=html.escape(str(front.get("title", ""))),
         subtitle=(f'<div class="sub">{html.escape(str(front["subtitle"]))}</div>'
                   if front.get("subtitle") else ""),
         cols=max(1, len(meta_items)) if meta_items else 1, spec=spec,
-        foot_left=html.escape(str(front.get("place", "Almaty, Kazakhstan"))),
-        site=SITE)
+        foot_left=html.escape(str(front.get("place", brand.place))),
+        site=brand.site)
 
 
 def _kicker(front: dict) -> str:
@@ -745,19 +762,21 @@ def render_pdf(blocks: list[tuple], front: dict, out_path: pathlib.Path,
 
     numbered = str(front.get("numbered", "true")).lower() not in ("false", "0", "no")
     has_mermaid = any(b[0] == "mermaid" for b in blocks)
-    fonts_css = (ASSETS / "fonts.css").read_text(encoding="utf-8")
+    brand = brands.get(front.get("brand"))
+    fonts_css = fonts_css_path(brand.key).read_text(encoding="utf-8")
     content = render(blocks, numbered=numbered)
 
     mermaid_tag = ""
     if has_mermaid:
         lib = (ASSETS / "mermaid.min.js").read_text(encoding="utf-8")
         mermaid_tag = (f"<script>{lib}</script>"
-                       f"<script type=\"module\">{MERMAID_INIT}</script>")
+                       f"<script type=\"module\">{mermaid_init(brand)}</script>")
 
     stem = re.sub(r"[^\w.-]+", "_", name)[:50] + f"-{os.getpid()}-{id(blocks) & 0xffff:x}"
     body_html = TMP / f"{stem}-body.html"
     body_html.write_text(BODY_TPL.format(
-        title=html.escape(str(front["title"])), fonts=fonts_css, css=BODY_CSS,
+        title=html.escape(str(front["title"])), fonts=fonts_css,
+        css=brands.tokens(brand) + BODY_CSS,
         content=content, mermaid=mermaid_tag), encoding="utf-8")
     body_pdf = TMP / f"{stem}-body.pdf"
     print_pdf(body_html, body_pdf, chrome, 15000 if has_mermaid else 5000)
@@ -899,6 +918,8 @@ def main(argv: list[str] | None = None) -> None:
                     help="не нумеровать разделы")
     ap.add_argument("--append", action="append", default=[], type=pathlib.Path,
                     help="дописать в конец ещё один md")
+    ap.add_argument("--brand", choices=sorted(brands.BRANDS),
+                    help="организация: чьё оформление применять")
     ap.add_argument("--docx", action="store_true",
                     help="собрать .docx вместо PDF")
     ap.add_argument("--photo", help="фото на обложку: путь к файлу или ссылка")
@@ -910,7 +931,7 @@ def main(argv: list[str] | None = None) -> None:
 
     overrides: dict = {}
     for name in ("title", "subtitle", "kicker", "index", "footer", "header",
-                 "photo", "style"):
+                 "photo", "style", "brand"):
         if getattr(args, name):
             overrides[name] = getattr(args, name)
     if args.confidential:

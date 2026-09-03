@@ -1,4 +1,4 @@
-"""Сборка .docx в оформлении A2DATA из тех же блоков, что и PDF.
+"""Сборка .docx в оформлении выбранного бренда из тех же блоков, что и PDF.
 
 Word собирается нативными средствами: обложка, колонтитулы, заголовки, списки,
 таблицы, код и цитаты — редактируемый текст, а не картинки. Оформление
@@ -20,33 +20,47 @@ import pymupdf
 from docx import Document
 from docx.enum.section import WD_SECTION
 from docx.enum.table import WD_TABLE_ALIGNMENT
-from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Emu, Pt, RGBColor
 
-from . import core
+from . import brands, core
 
-NAVY = RGBColor(0x0B, 0x26, 0x60)
-BLUE = RGBColor(0x1F, 0xA8, 0xFC)
-BLUE_DARK = RGBColor(0x12, 0x89, 0xD5)
-AMBER = RGBColor(0xB8, 0x6A, 0x06)
-INK = RGBColor(0x11, 0x17, 0x22)
-GRAY = RGBColor(0x6B, 0x72, 0x80)
-LIGHT = RGBColor(0x9C, 0xA3, 0xAF)
 WHITE = RGBColor(0xFF, 0xFF, 0xFF)
-# В Word нельзя рассчитывать на фирменные шрифты: если Inter не установлен,
-# документ подставит засечки. Берём системные, ближайшие по духу к брендбуку.
-FONT = "Segoe UI"
-MONO = "Consolas"
 DPI = 150
 
-HEX_NAVY = "0B2660"
-HEX_BLUE = "1FA8FC"
-HEX_AMBER = "FF9F1C"
-HEX_LINE = "E1E4EA"
-HEX_SOFT = "F7F8FA"
-HEX_AMBER_BG = "FFF8EC"
+
+def _rgb(color: str) -> RGBColor:
+    color = color.lstrip("#")
+    return RGBColor(int(color[0:2], 16), int(color[2:4], 16), int(color[4:6], 16))
+
+
+class Theme:
+    """Цвета и шрифты бренда в виде, удобном для python-docx.
+
+    В Word нельзя рассчитывать на фирменные шрифты: если их нет в системе,
+    документ подставит засечки. Поэтому берём системные, близкие по духу.
+    """
+
+    def __init__(self, brand: brands.Brand) -> None:
+        self.brand = brand
+        self.main = _rgb(brand.color("brand"))
+        self.accent = _rgb(brand.color("accent"))
+        self.accent_dark = _rgb(brand.color("accent_dark"))
+        self.mark = _rgb(brand.color("mark_dark"))
+        self.ink = _rgb(brand.color("ink"))
+        self.gray = _rgb(brand.neutrals["n500"])
+        self.light = _rgb(brand.neutrals["n400"])
+        self.hex_main = brand.color("brand").lstrip("#")
+        self.hex_mark = brand.color("mark").lstrip("#")
+        self.hex_accent = brand.color("accent").lstrip("#")
+        self.hex_line = brand.neutrals["n200"].lstrip("#")
+        self.hex_soft = brand.neutrals["n50"].lstrip("#")
+        self.hex_mark_bg = brand.color("mark_50").lstrip("#")
+        self.font = brand.fonts.word_body
+        self.display = brand.fonts.word_display
+        self.mono = brand.fonts.word_mono
 
 
 # --------------------------------------------------------------------------- #
@@ -76,7 +90,7 @@ def _borders(paragraph, **sides) -> None:
     paragraph._p.get_or_add_pPr().append(pbdr)
 
 
-def _cell_borders(cell, color: str = HEX_LINE, size: int = 4,
+def _cell_borders(cell, color: str = "E1E4EA", size: int = 4,
                   sides: tuple[str, ...] = ("top", "bottom")) -> None:
     props = cell._tc.get_or_add_tcPr()
     borders = OxmlElement("w:tcBorders")
@@ -100,8 +114,8 @@ def _repeat_header(row) -> None:
     props.append(header)
 
 
-def _field(paragraph, code: str, size: float = 8,
-           color: RGBColor = NAVY, mono: bool = True):
+def _field(paragraph, theme: "Theme", code: str, size: float = 8,
+           color: RGBColor | None = None):
     """Поле Word — например номер страницы, который считается сам."""
     run = paragraph.add_run()
     begin = OxmlElement("w:fldChar")
@@ -114,26 +128,10 @@ def _field(paragraph, code: str, size: float = 8,
     run._r.append(begin)
     run._r.append(instr)
     run._r.append(end)
-    run.font.name = MONO if mono else FONT
+    run.font.name = theme.mono
     run.font.size = Pt(size)
-    run.font.color.rgb = color
+    run.font.color.rgb = color or theme.main
     return run
-
-
-def _tabs(paragraph, positions) -> None:
-    """Табстопы: [(см, 'right'|'center'|'left'), …].
-
-    Свои позиции задаём с нуля: у стиля колонтитула уже есть центр и право,
-    иначе текст уезжает к ближайшей чужой позиции."""
-    paragraph.paragraph_format.tab_stops.clear_all()
-    pPr = paragraph._p.get_or_add_pPr()
-    tabs = OxmlElement("w:tabs")
-    for position, align in positions:
-        node = OxmlElement("w:tab")
-        node.set(qn("w:val"), align)
-        node.set(qn("w:pos"), str(int(Cm(position).twips)))
-        tabs.append(node)
-    pPr.append(tabs)
 
 
 def _spacing(paragraph, before: float = 0, after: float = 0,
@@ -152,7 +150,7 @@ def _spacing(paragraph, before: float = 0, after: float = 0,
 INLINE_RE = re.compile(r"(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)")
 
 
-def _style_run(run, size: float, color: RGBColor, name: str = FONT) -> None:
+def _style_run(run, size: float, color: RGBColor, name: str) -> None:
     run.font.name = name
     run.font.size = Pt(size)
     run.font.color.rgb = color
@@ -161,9 +159,12 @@ def _style_run(run, size: float, color: RGBColor, name: str = FONT) -> None:
     rpr.set(qn("w:cs"), name)
 
 
-def _runs(paragraph, text: str, size: float = 10.5,
-          color: RGBColor = INK, bold: bool = False) -> None:
+def _runs(paragraph, theme: "Theme", text: str, size: float = 10.5,
+          color: RGBColor | None = None, bold: bool = False,
+          font: str | None = None) -> None:
     """Разбирает **жирный**, *курсив* и `код` в отдельные run-ы."""
+    color = color or theme.ink
+    font = font or theme.font
     for part in INLINE_RE.split(str(text)):
         if not part:
             continue
@@ -171,17 +172,17 @@ def _runs(paragraph, text: str, size: float = 10.5,
         if part.startswith("**") and part.endswith("**"):
             run.text = part[2:-2]
             run.bold = True
-            _style_run(run, size, color)
+            _style_run(run, size, color, font)
         elif part.startswith("`") and part.endswith("`"):
             run.text = part[1:-1]
-            _style_run(run, size - 1.5, NAVY, MONO)
+            _style_run(run, size - 1.5, theme.main, theme.mono)
         elif part.startswith("*") and part.endswith("*"):
             run.text = part[1:-1]
             run.italic = True
-            _style_run(run, size, color)
+            _style_run(run, size, color, font)
         else:
             run.text = part
-            _style_run(run, size, color)
+            _style_run(run, size, color, font)
         if bold:
             run.bold = True
 
@@ -230,17 +231,18 @@ def _pages_to_png(html_text: str, chrome: str, name: str,
         pdf_path.unlink(missing_ok=True)
 
 
-def _diagram_images(sources: list[str], chrome: str,
+def _diagram_images(sources: list[str], brand: brands.Brand, chrome: str,
                     name: str) -> list[tuple[bytes, float]]:
     if not sources:
         return []
-    fonts = (core.ASSETS / "fonts.css").read_text(encoding="utf-8")
+    fonts = core.fonts_css_path(brand.key).read_text(encoding="utf-8")
     lib = (core.ASSETS / "mermaid.min.js").read_text(encoding="utf-8")
     body = "".join(
         '<div class="page"><div class="dg dg-mermaid"><pre class="mermaid">'
         f'{html_mod.escape(src)}</pre></div></div>' for src in sources)
     page = (f'<!doctype html><html lang="ru"><head><meta charset="utf-8">'
-            f'<style>{fonts}</style><style>{core.BODY_CSS}'
+            f'<style>{fonts}</style>'
+            f'<style>{brands.tokens(brand)}{core.BODY_CSS}'
             '@page{size:A4;margin:8mm}'
             '.page{break-after:page;display:flex;align-items:center;'
             'justify-content:center;height:281mm}'
@@ -248,7 +250,8 @@ def _diagram_images(sources: list[str], chrome: str,
             '.dg-mermaid svg{max-height:275mm}'
             f'</style></head><body>{body}'
             f'<script>{lib}</script>'
-            f'<script type="module">{core.MERMAID_INIT}</script></body></html>')
+            f'<script type="module">{core.mermaid_init(brand)}</script>'
+            '</body></html>')
     return _pages_to_png(page, chrome, f"{name}-diagrams", crop=True)
 
 
@@ -274,23 +277,23 @@ def _load_image(src: str) -> bytes | None:
 # Стили, обложка и колонтитулы
 # --------------------------------------------------------------------------- #
 
-def _setup_styles(document: Document) -> None:
+def _setup_styles(document: Document, theme: "Theme") -> None:
     normal = document.styles["Normal"]
-    normal.font.name = FONT
+    normal.font.name = theme.font
     normal.font.size = Pt(10.5)
-    normal.font.color.rgb = INK
+    normal.font.color.rgb = theme.ink
     normal.paragraph_format.space_after = Pt(7)
     normal.paragraph_format.line_spacing = 1.3
     rpr = normal.element.get_or_add_rPr().get_or_add_rFonts()
-    rpr.set(qn("w:eastAsia"), FONT)
-    rpr.set(qn("w:cs"), FONT)
+    rpr.set(qn("w:eastAsia"), theme.font)
+    rpr.set(qn("w:cs"), theme.font)
 
     for name, size, color, before in (
-            ("Heading 1", 16, NAVY, 18),
-            ("Heading 2", 12.5, NAVY, 14),
-            ("Heading 3", 11, INK, 10)):
+            ("Heading 1", 16, theme.main, 18),
+            ("Heading 2", 12.5, theme.main, 14),
+            ("Heading 3", 11, theme.ink, 10)):
         style = document.styles[name]
-        style.font.name = FONT
+        style.font.name = theme.display
         style.font.size = Pt(size)
         style.font.bold = True
         style.font.color.rgb = color
@@ -300,58 +303,54 @@ def _setup_styles(document: Document) -> None:
 
     for name in ("List Bullet", "List Number"):
         style = document.styles[name]
-        style.font.name = FONT
+        style.font.name = theme.font
         style.font.size = Pt(10.5)
-        style.font.color.rgb = INK
+        style.font.color.rgb = theme.ink
         style.paragraph_format.space_after = Pt(3)
 
 
-def _wordmark(paragraph, width_cm: float = 3.2) -> None:
+def _wordmark(paragraph, theme: "Theme", width_cm: float = 3.2) -> None:
     """Логотип картинкой из брендбука — не зависит от шрифтов в системе."""
-    logo = core.ASSETS / "logo" / "logo-color.png"
+    logo = core.ASSETS / "logo" / f"{theme.brand.logo}-color.png"
     if logo.is_file():
         paragraph.add_run().add_picture(str(logo), width=Cm(width_cm))
         return
-    a2 = paragraph.add_run("A2")
-    a2.bold = True
-    _style_run(a2, width_cm * 3.4, NAVY)
-    data = paragraph.add_run("DATA")
-    data.bold = True
-    _style_run(data, width_cm * 3.4, BLUE)
+    run = paragraph.add_run(theme.brand.name)
+    run.bold = True
+    _style_run(run, width_cm * 3.4, theme.main, theme.display)
 
 
-def _accent_bar(document: Document, width_cm: float = 2.2,
-                color: str = HEX_AMBER) -> None:
+def _accent_bar(document: Document, theme: "Theme", width_cm: float = 2.2) -> None:
     """Короткий цветной штрих — тот же акцент, что на обложке PDF."""
     table = document.add_table(rows=1, cols=1)
     table.autofit = False
     cell = table.rows[0].cells[0]
     cell.width = Cm(width_cm)
-    _shade(cell._tc.get_or_add_tcPr(), color)
+    _shade(cell._tc.get_or_add_tcPr(), theme.hex_mark)
     _cell_borders(cell, sides=())
     paragraph = cell.paragraphs[0]
     paragraph.text = ""
     _spacing(paragraph, after=0, line=0.2)
     run = paragraph.add_run(" ")
-    _style_run(run, 2, WHITE)
+    _style_run(run, 2, WHITE, theme.font)
 
 
-def _cover(document: Document, front: dict) -> None:
+def _cover(document: Document, theme: "Theme", front: dict) -> None:
     """Деловая титульная страница: акцент, логотип, заголовок и реквизиты."""
     section = document.sections[0]
     section.top_margin = Cm(2.8)
     section.bottom_margin = Cm(2.4)
     section.left_margin = section.right_margin = Cm(2.4)
 
-    _accent_bar(document)
+    _accent_bar(document, theme)
 
     logo = document.add_paragraph()
     _spacing(logo, before=10, after=4)
-    _wordmark(logo, 3.2)
+    _wordmark(logo, theme, 3.2)
 
     rule = document.add_paragraph()
     _spacing(rule, before=0, after=0)
-    _borders(rule, bottom=(HEX_LINE, 6))
+    _borders(rule, bottom=(theme.hex_line, 6))
 
     spacer = document.add_paragraph()
     _spacing(spacer, after=140)
@@ -365,27 +364,28 @@ def _cover(document: Document, front: dict) -> None:
         line = document.add_paragraph()
         _spacing(line, after=8)
         run = line.add_run("   ".join(kicker_parts).upper())
-        _style_run(run, 8.5, BLUE_DARK, MONO)
+        _style_run(run, 8.5, theme.accent_dark, theme.mono)
 
     title = document.add_paragraph()
     _spacing(title, after=8, line=1.05)
     run = title.add_run(_plain(front.get("title", "")))
     run.bold = True
-    _style_run(run, 30, NAVY)
+    _style_run(run, 30, theme.main, theme.display)
 
     if front.get("subtitle"):
         subtitle = document.add_paragraph()
         _spacing(subtitle, after=10, line=1.25)
-        _runs(subtitle, str(front["subtitle"]), size=12.5, color=GRAY)
+        _runs(subtitle, theme, str(front["subtitle"]), size=12.5,
+              color=theme.gray)
 
     if front.get("confidential"):
         chip = document.add_paragraph()
         _spacing(chip, before=6, after=0)
-        _borders(chip, left=(HEX_AMBER, 18))
+        _borders(chip, left=(theme.hex_mark, 18))
         chip.paragraph_format.left_indent = Cm(0.3)
         run = chip.add_run(str(front["confidential"]).upper())
         run.bold = True
-        _style_run(run, 8.5, AMBER, MONO)
+        _style_run(run, 8.5, theme.mark, theme.mono)
 
     meta = list((front.get("meta") or {}).items())
     tail = document.add_paragraph()
@@ -400,23 +400,28 @@ def _cover(document: Document, front: dict) -> None:
             head_cell.paragraphs[0].text = ""
             _spacing(head_cell.paragraphs[0], after=2)
             run = head_cell.paragraphs[0].add_run(str(key).upper())
-            _style_run(run, 7.5, LIGHT, MONO)
-            _cell_borders(head_cell, sides=("top",))
+            _style_run(run, 7.5, theme.light, theme.mono)
+            _cell_borders(head_cell, color=theme.hex_line, sides=("top",))
 
             value_cell = table.rows[1].cells[index]
             value_cell.paragraphs[0].text = ""
             _spacing(value_cell.paragraphs[0], after=0)
             run = value_cell.paragraphs[0].add_run(_plain(value))
-            _style_run(run, 10, NAVY, MONO)
+            _style_run(run, 10, theme.main, theme.mono)
             _cell_borders(value_cell, sides=())
 
-    foot = document.add_paragraph()
-    _spacing(foot, before=18, after=0)
-    _tabs(foot, [(16.2, "right")])
-    left = foot.add_run(str(front.get("place", "Almaty, Kazakhstan")))
-    _style_run(left, 8, LIGHT, MONO)
-    right = foot.add_run("\t" + core.SITE)
-    _style_run(right, 8, NAVY, MONO)
+    document.add_paragraph()
+    table = document.add_table(rows=1, cols=2)
+    left, right = table.rows[0].cells
+    for cell in (left, right):
+        _cell_borders(cell, sides=())
+        cell.paragraphs[0].text = ""
+        _spacing(cell.paragraphs[0], after=0)
+    right.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    place = left.paragraphs[0].add_run(str(front.get("place", theme.brand.place)))
+    _style_run(place, 8, theme.light, theme.mono)
+    site = right.paragraphs[0].add_run(theme.brand.site)
+    _style_run(site, 8, theme.main, theme.mono)
 
 
 def _runner_table(container, width_cm: float):
@@ -436,7 +441,7 @@ def _runner_table(container, width_cm: float):
     return table, left.paragraphs[0], right.paragraphs[0]
 
 
-def _runners(document: Document, front: dict) -> None:
+def _runners(document: Document, theme: "Theme", front: dict) -> None:
     """Колонтитулы: логотип и название сверху, подпись и номера страниц снизу."""
     section = document.sections[-1]
     section.is_linked_to_previous = False  # титульная остаётся без колонтитулов
@@ -450,25 +455,25 @@ def _runners(document: Document, front: dict) -> None:
     header = section.header
     header.paragraphs[0].text = ""
     _spacing(header.paragraphs[0], after=0, line=0.6)
-    table, left, right = _runner_table(header, width)
-    _wordmark(left, 1.7)
+    _, left, right = _runner_table(header, width)
+    _wordmark(left, theme, 1.7)
     caption = right.add_run(_plain(front.get("header", front.get("title", ""))))
-    _style_run(caption, 8, GRAY)
+    _style_run(caption, 8, theme.gray, theme.font)
     rule = header.add_paragraph()
     _spacing(rule, before=0, after=0, line=0.6)
-    _borders(rule, top=(HEX_LINE, 4))
+    _borders(rule, top=(theme.hex_line, 4))
 
     footer = section.footer
     footer.paragraphs[0].text = ""
     _spacing(footer.paragraphs[0], after=0, line=0.6)
-    _borders(footer.paragraphs[0], bottom=(HEX_LINE, 4))
-    table, left, right = _runner_table(footer, width)
+    _borders(footer.paragraphs[0], bottom=(theme.hex_line, 4))
+    _, left, right = _runner_table(footer, width)
     signature = left.add_run(_plain(front.get("footer", "")))
-    _style_run(signature, 8, LIGHT)
-    _field(right, "PAGE")
+    _style_run(signature, 8, theme.light, theme.font)
+    _field(right, theme, "PAGE")
     separator = right.add_run(" / ")
-    _style_run(separator, 8, LIGHT, MONO)
-    _field(right, "NUMPAGES", color=LIGHT)
+    _style_run(separator, 8, theme.light, theme.mono)
+    _field(right, theme, "NUMPAGES", color=theme.light)
 
 
 # --------------------------------------------------------------------------- #
@@ -481,26 +486,27 @@ def write_docx(blocks: list[tuple], front: dict, out_path: pathlib.Path,
     core.ensure_assets(quiet=True)
     chrome = chrome or core.find_chrome()
     front = dict(front)
+    theme = Theme(brands.get(front.get("brand")))
     if not front.get("title"):
         first = next((b[1] for b in blocks if b[0] == "h1"), name)
         front["title"] = re.sub(r"^Задание\s+\d+\.\s*", "", str(first))
 
     document = Document()
-    _setup_styles(document)
+    _setup_styles(document, theme)
 
     with_cover = str(front.get("cover", "true")).lower() not in ("false", "0", "no")
     if with_cover:
-        _cover(document, front)
+        _cover(document, theme, front)
         document.add_section(WD_SECTION.NEW_PAGE)
 
     section = document.sections[-1]
     section.top_margin = Cm(2.4)
     section.bottom_margin = Cm(2.2)
     section.left_margin = section.right_margin = Cm(2.2)
-    _runners(document, front)
+    _runners(document, theme, front)
 
     diagrams = _diagram_images([b[1] for b in blocks if b[0] == "mermaid"],
-                               chrome, name)
+                               theme.brand, chrome, name)
     diagram_no = 0
     numbered = str(front.get("numbered", "true")).lower() not in ("false", "0", "no")
     section_no = 0
@@ -515,69 +521,70 @@ def write_docx(blocks: list[tuple], front: dict, out_path: pathlib.Path,
         if kind == "h2":
             section_no += 1
             paragraph = document.add_paragraph(style="Heading 1")
-            _borders(paragraph, top=(HEX_LINE, 4))
+            _borders(paragraph, top=(theme.hex_line, 4))
             if numbered:
                 number = paragraph.add_run(f"{section_no:02d}   ")
-                _style_run(number, 10, BLUE_DARK, MONO)
-            _runs(paragraph, block[1], size=16, color=NAVY, bold=True)
+                _style_run(number, 10, theme.accent_dark, theme.mono)
+            _runs(paragraph, theme, block[1], size=16, color=theme.main,
+                  bold=True, font=theme.display)
         elif kind in ("h3", "h4"):
             paragraph = document.add_paragraph(style="Heading 3")
-            _runs(paragraph, block[1], size=11, color=INK, bold=True)
+            _runs(paragraph, theme, block[1], size=11, color=theme.ink,
+                  bold=True, font=theme.display)
         elif kind == "p":
-            _runs(document.add_paragraph(), block[1])
+            _runs(document.add_paragraph(), theme, block[1])
         elif kind in ("ul", "ol"):
             style = "List Bullet" if kind == "ul" else "List Number"
             for item in block[1]:
-                paragraph = document.add_paragraph(style=style)
-                _runs(paragraph, item)
+                _runs(document.add_paragraph(style=style), theme, item)
         elif kind == "code":
             for line in str(block[2]).split("\n"):
                 paragraph = document.add_paragraph()
                 _spacing(paragraph, after=0, line=1.15)
                 paragraph.paragraph_format.left_indent = Cm(0.5)
-                _shade(paragraph._p.get_or_add_pPr(), HEX_SOFT)
-                _borders(paragraph, left=(HEX_BLUE, 18))
+                _shade(paragraph._p.get_or_add_pPr(), theme.hex_soft)
+                _borders(paragraph, left=(theme.hex_accent, 18))
                 run = paragraph.add_run(line or " ")
-                _style_run(run, 8.5, INK, MONO)
+                _style_run(run, 8.5, theme.ink, theme.mono)
             document.add_paragraph()
         elif kind == "note":
             paragraph = document.add_paragraph()
             _spacing(paragraph, before=4, after=8, line=1.25)
             paragraph.paragraph_format.left_indent = Cm(0.5)
-            _shade(paragraph._p.get_or_add_pPr(), HEX_AMBER_BG)
-            _borders(paragraph, left=(HEX_AMBER, 18))
-            _runs(paragraph, block[1], size=10)
+            _shade(paragraph._p.get_or_add_pPr(), theme.hex_mark_bg)
+            _borders(paragraph, left=(theme.hex_mark, 18))
+            _runs(paragraph, theme, block[1], size=10)
         elif kind == "cap":
             paragraph = document.add_paragraph()
             paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
             _spacing(paragraph, before=2, after=10)
             run = paragraph.add_run(_plain(block[1]))
             run.italic = True
-            _style_run(run, 8.5, GRAY)
+            _style_run(run, 8.5, theme.gray, theme.font)
         elif kind == "hr":
             paragraph = document.add_paragraph()
             _spacing(paragraph, before=6, after=6)
-            _borders(paragraph, bottom=(HEX_LINE, 6))
+            _borders(paragraph, bottom=(theme.hex_line, 6))
         elif kind == "table":
             head, rows = block[1], block[2]
             table = document.add_table(rows=1, cols=len(head))
             table.alignment = WD_TABLE_ALIGNMENT.CENTER
             _repeat_header(table.rows[0])
             for cell, title in zip(table.rows[0].cells, head):
-                _shade(cell._tc.get_or_add_tcPr(), HEX_NAVY)
-                _cell_borders(cell, color=HEX_NAVY, sides=())
+                _shade(cell._tc.get_or_add_tcPr(), theme.hex_main)
+                _cell_borders(cell, color=theme.hex_main, sides=())
                 cell.paragraphs[0].text = ""
                 _spacing(cell.paragraphs[0], before=3, after=3)
                 run = cell.paragraphs[0].add_run(_plain(title))
                 run.bold = True
-                _style_run(run, 9, WHITE)
+                _style_run(run, 9, WHITE, theme.font)
             for row in rows:
                 cells = table.add_row().cells
                 for cell, value in zip(cells, row):
-                    _cell_borders(cell, sides=("bottom",))
+                    _cell_borders(cell, color=theme.hex_line, sides=("bottom",))
                     cell.paragraphs[0].text = ""
                     _spacing(cell.paragraphs[0], before=3, after=3, line=1.2)
-                    _runs(cell.paragraphs[0], str(value), size=9.5)
+                    _runs(cell.paragraphs[0], theme, str(value), size=9.5)
             document.add_paragraph()
         elif kind == "mermaid":
             if diagram_no < len(diagrams):
@@ -604,7 +611,7 @@ def write_docx(blocks: list[tuple], front: dict, out_path: pathlib.Path,
                     pass
 
     document.core_properties.title = _plain(front["title"])
-    document.core_properties.author = "A2DATA"
+    document.core_properties.author = theme.brand.name
     document.core_properties.comments = _plain(front.get("subtitle", ""))
     out_path.parent.mkdir(parents=True, exist_ok=True)
     document.save(out_path)

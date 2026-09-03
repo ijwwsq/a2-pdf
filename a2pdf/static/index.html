@@ -31,8 +31,16 @@ header{background:var(--navy);color:#fff;padding:16px 28px;display:flex;
        align-items:center;justify-content:space-between;
        border-bottom:3px solid var(--amber);flex:none}
 .wordmark{height:16px;width:auto;display:block}
-.eyebrow{font-family:var(--mono);font-size:10.5px;font-weight:500;letter-spacing:1.6px;
-         text-transform:uppercase;color:#86A2D4}
+.head-right{display:flex;align-items:center;gap:14px}
+.orgs{display:flex;gap:2px;background:rgba(255,255,255,.12);padding:3px;
+      border-radius:var(--r-md)}
+.orgs button{border:0;background:none;color:rgba(255,255,255,.72);
+  font:600 12.5px var(--font);padding:6px 12px;border-radius:6px;cursor:pointer}
+.orgs button:hover{color:#fff}
+.orgs button.on{background:#fff;color:var(--navy)}
+.exit{border:1px solid rgba(255,255,255,.28);background:none;color:rgba(255,255,255,.8);
+  font:500 12.5px var(--font);padding:6px 12px;border-radius:var(--r-md);cursor:pointer}
+.exit:hover{border-color:#fff;color:#fff}
 
 .layout{flex:1;display:grid;grid-template-columns:minmax(380px,470px) 1fr;
         gap:24px;align-items:start;padding:24px 28px 40px;max-width:1440px;
@@ -222,8 +230,11 @@ footer{padding:14px 28px;border-top:1px solid var(--n200);background:var(--n0);
 </head>
 <body>
 <header>
-  <img class="wordmark" src="/logo/logo-white.svg" alt="A2DATA">
-  <div class="eyebrow">Документы</div>
+  <img class="wordmark" id="logo" src="/logo/a2data-white.svg" alt="">
+  <div class="head-right">
+    <div class="orgs" id="orgs"></div>
+    <form method="post" action="/logout"><button class="exit" type="submit">Выйти</button></form>
+  </div>
 </header>
 
 <div class="layout">
@@ -368,6 +379,37 @@ const $ = (id) => document.getElementById(id);
 const fileInput = $('file'), drop = $('drop'), chosen = $('chosen'), status = $('status');
 let tab = 'pane-file';
 let format = 'pdf';
+let org = localStorage.getItem('a2pdf-brand') || 'a2data';
+let ORGS = [];
+
+function paint(brand) {
+  const root = document.documentElement.style;
+  root.setProperty('--navy', brand.colors.brand);
+  root.setProperty('--blue', brand.colors.accent);
+  root.setProperty('--blue-700', brand.colors.accent);
+  root.setProperty('--amber', brand.colors.mark);
+  $('logo').src = `/logo/${brand.key}-white.svg`;
+  document.title = brand.name + ' · Документы';
+  drawTemplates();
+}
+
+function selectOrg(key) {
+  org = key;
+  try { localStorage.setItem('a2pdf-brand', key); } catch (e) {}
+  document.querySelectorAll('.orgs button').forEach(b =>
+    b.classList.toggle('on', b.dataset.org === key));
+  const brand = ORGS.find(b => b.key === key);
+  if (brand) paint(brand);
+}
+
+fetch('/brands').then(r => r.json()).then(data => {
+  ORGS = data.brands || [];
+  $('orgs').innerHTML = ORGS.map(b =>
+    `<button type="button" data-org="${b.key}">${b.name}</button>`).join('');
+  document.querySelectorAll('.orgs button').forEach(b =>
+    b.addEventListener('click', () => selectOrg(b.dataset.org)));
+  selectOrg(ORGS.some(b => b.key === org) ? org : (data.default || 'a2data'));
+}).catch(() => {});
 let lastUrl = null;
 
 document.querySelectorAll('.formats button').forEach(b =>
@@ -562,6 +604,7 @@ $('form').addEventListener('submit', async (ev) => {
     .forEach(k => { const v = $(k).value.trim(); if (v) body.append(k, v); });
   body.append('style', $('style').value);
   body.append('format', format);
+  body.append('brand', org);
   if ($('background').value) body.append('background', $('background').value);
   if ($('photo').files[0]) body.append('photo', $('photo').files[0]);
   if (!$('cover').checked) body.append('cover', '0');
@@ -573,6 +616,7 @@ $('form').addEventListener('submit', async (ev) => {
     (tab === 'pane-url' ? 'Читаю страницу' : 'Собираю');
   try {
     const res = await fetch('/convert', { method: 'POST', body });
+    if (res.status === 401) { window.location = '/login'; return; }
     if (!res.ok) {
       let msg = 'Ошибка ' + res.status;
       try { msg = (await res.json()).detail || msg; } catch (e) {}

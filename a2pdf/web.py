@@ -24,11 +24,13 @@ import urllib.parse
 import uuid
 from collections import deque
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi import (Cookie, Depends, FastAPI, File, Form, HTTPException,
+                     Request, Response, UploadFile)
+from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
+                               RedirectResponse)
 from starlette.background import BackgroundTask
 
-from . import core, notion
+from . import auth, brands, core, notion
 from .docx_reader import docx_to_blocks
 from .fetch import FetchError, fetch
 
@@ -46,6 +48,7 @@ MIME = {"pdf": "application/pdf",
 COVERS = core.ASSETS / "covers"          # встроенные фоны обложки
 
 STATIC = pathlib.Path(__file__).resolve().parent / "static"
+AUTH = auth.Config()
 OUT_DIR = pathlib.Path(os.environ.get("A2PDF_OUT") or tempfile.gettempdir()) / "a2pdf"
 
 @contextlib.asynccontextmanager
@@ -54,6 +57,12 @@ async def lifespan(application: FastAPI):
     core.ensure_assets(quiet=True)
     application.state.chrome = core.find_chrome()
     log.info("chrome: %s, воркеров: %s", application.state.chrome, WORKERS)
+    if not AUTH.configured:
+        log.warning("Учётная запись не настроена: сервис отвечает только "
+                    "с локальной машины. Задайте A2PDF_PASSWORD_HASH "
+                    "(python -m a2pdf.auth)")
+    elif not AUTH.secret_from_env:
+        log.warning("A2PDF_SECRET не задан: сессии слетят при перезапуске")
     for stale in OUT_DIR.glob("*"):  # мусор от прошлого запуска
         stale.unlink(missing_ok=True)
     yield
@@ -104,6 +113,83 @@ def _check_url(raw: str) -> str:
     return url
 
 
+def _client(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+def _secure(request: Request) -> bool:
+    """Кука уходит только по https, если сервис за ним и стоит."""
+    proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+    return proto == "https"
+
+
+def current_user(request: Request,
+                 session: str | None = Cookie(default=None, alias=auth.COOKIE)
+                 ) -> str:
+    """Пускает по действующей сессии; без учётки — только с локальной машины."""
+    if not AUTH.configured:
+        if auth.is_local(_client(request)):
+            return "local"
+        raise HTTPException(503, "Сервис не настроен: не задана учётная запись")
+    user = auth.validate(AUTH, session)
+    if not user:
+        raise HTTPException(401, "Нужно войти")
+    return user
+
+
+def _same_origin(request: Request) -> bool:
+    """Простая защита от запросов с чужих страниц."""
+    origin = request.headers.get("origin")
+    referer = request.headers.get("referer", "")
+    host = request.headers.get("host", "")
+    if origin:
+        return origin.split("//")[-1] == host
+    if referer:
+        return referer.split("//")[-1].split("/")[0] == host
+    return True     # запросы без Origin: curl и подобное
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request,
+               session: str | None = Cookie(default=None, alias=auth.COOKIE)):
+    if AUTH.configured and auth.validate(AUTH, session):
+        return RedirectResponse("/", status_code=303)
+    page = (STATIC / "login.html").read_text(encoding="utf-8")
+    return HTMLResponse(page.replace("{{error}}", ""))
+
+
+@app.post("/login")
+def login(request: Request, response: Response,
+          username: str = Form(...), password: str = Form(...)):
+    if not _same_origin(request):
+        raise HTTPException(400, "Запрос пришёл со стороннего адреса")
+    client = _client(request)
+    if not auth.attempt_allowed(client):
+        raise HTTPException(429, "Слишком много попыток, подождите пять минут")
+    if not auth.check(AUTH, username, password):
+        auth.note_failure(client)
+        log.warning("неудачный вход с %s", client)
+        page = (STATIC / "login.html").read_text(encoding="utf-8")
+        return HTMLResponse(
+            page.replace("{{error}}",
+                         '<div class="error">Неверный логин или пароль</div>'),
+            status_code=401)
+    auth.reset_attempts(client)
+    value, max_age = auth.issue(AUTH, AUTH.user)
+    redirect = RedirectResponse("/", status_code=303)
+    redirect.set_cookie(auth.COOKIE, value, max_age=max_age, httponly=True,
+                        samesite="lax", secure=_secure(request), path="/")
+    log.info("вход: %s с %s", AUTH.user, client)
+    return redirect
+
+
+@app.post("/logout")
+def logout(request: Request):
+    redirect = RedirectResponse("/login", status_code=303)
+    redirect.delete_cookie(auth.COOKIE, path="/")
+    return redirect
+
+
 @app.get("/healthz")
 def healthz() -> JSONResponse:
     return JSONResponse({"status": "ok", "version": app.version,
@@ -112,15 +198,26 @@ def healthz() -> JSONResponse:
                          "workers": WORKERS})
 
 
+@app.get("/brands")
+def brand_list(user: str = Depends(current_user)) -> JSONResponse:
+    """Организации, для которых сервис умеет верстать."""
+    return JSONResponse({"brands": [
+        {"key": brand.key, "name": brand.name, "site": brand.site,
+         "colors": {"brand": brand.color("brand"),
+                    "accent": brand.color("accent"),
+                    "mark": brand.color("mark")}}
+        for brand in brands.BRANDS.values()], "default": brands.DEFAULT})
+
+
 @app.get("/covers")
-def covers() -> JSONResponse:
+def covers(user: str = Depends(current_user)) -> JSONResponse:
     """Список встроенных фонов обложки."""
     names = sorted(p.stem for p in COVERS.glob("*.jpg")) if COVERS.is_dir() else []
     return JSONResponse({"covers": names})
 
 
 @app.get("/covers/{name}.jpg")
-def cover_image(name: str) -> FileResponse:
+def cover_image(name: str, user: str = Depends(current_user)) -> FileResponse:
     path = COVERS / f"{pathlib.Path(name).stem}.jpg"
     if not path.is_file():
         raise HTTPException(404, "Такого фона нет")
@@ -139,14 +236,20 @@ def logo(name: str) -> FileResponse:
 
 
 @app.get("/fonts.css")
-def fonts() -> FileResponse:
-    """Те же Inter и JetBrains Mono, что уходят в PDF, — без внешних CDN."""
-    return FileResponse(core.ASSETS / "fonts.css", media_type="text/css",
+def fonts(brand: str | None = None) -> FileResponse:
+    """Те же шрифты, что уходят в документ, — без внешних CDN."""
+    theme = brands.get(brand)
+    return FileResponse(core.fonts_css_path(theme.key), media_type="text/css",
                         headers={"Cache-Control": "public, max-age=604800"})
 
 
 @app.get("/", response_class=HTMLResponse)
-def index() -> HTMLResponse:
+def index(request: Request,
+          session: str | None = Cookie(default=None, alias=auth.COOKIE)):
+    if AUTH.configured and not auth.validate(AUTH, session):
+        return RedirectResponse("/login", status_code=303)
+    if not AUTH.configured and not auth.is_local(_client(request)):
+        raise HTTPException(503, "Сервис не настроен: не задана учётная запись")
     return HTMLResponse((STATIC / "index.html").read_text(encoding="utf-8"))
 
 
@@ -217,6 +320,7 @@ def _convert(source: dict, overrides: dict, chrome: str,
 @app.post("/convert")
 async def convert(
     request: Request,
+    user: str = Depends(current_user),
     file: UploadFile | None = File(None),
     photo: UploadFile | None = File(None),
     text: str | None = Form(None),
@@ -230,13 +334,14 @@ async def convert(
     confidential: str | None = Form(None),
     meta: str | None = Form(None),
     style: str | None = Form(None),
+    brand: str | None = Form(None),
     format: str | None = Form(None),
     background: str | None = Form(None),
     cover: str | None = Form(None),
     numbered: str | None = Form(None),
 ):
     fmt = "docx" if (format or "").lower() in ("docx", "word") else "pdf"
-    client = request.client.host if request.client else "unknown"
+    client = _client(request)
     if not _rate_ok(client):
         raise HTTPException(429, "Слишком много запросов, попробуйте через минуту")
 
@@ -270,6 +375,7 @@ async def convert(
                            confidential=confidential, meta=meta)
     if style in ("light", "dark"):
         overrides["style"] = style
+    overrides["brand"] = brands.get(brand).key
     if cover in ("0", "false", "off"):
         overrides["cover"] = "false"
     if numbered in ("0", "false", "off"):
@@ -310,7 +416,7 @@ async def convert(
             if photo_path:
                 photo_path.unlink(missing_ok=True)
 
-    log.info("%s -> %s.%s, %.1f c, %d KB", source["kind"], stem, fmt,
+    log.info("%s: %s -> %s.%s, %.1f c, %d KB", user, source["kind"], stem, fmt,
              time.monotonic() - started, out_path.stat().st_size // 1024)
     return FileResponse(
         out_path, media_type=MIME[fmt], filename=f"{stem}.{fmt}",
