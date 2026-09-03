@@ -235,6 +235,15 @@ def font_sets(user: str = Depends(current_user)) -> JSONResponse:
         for f in brands.FONT_SETS.values()]})
 
 
+@app.get("/schemes")
+def diagram_schemes(user: str = Depends(current_user)) -> JSONResponse:
+    """Шаблоны оформления для схем mermaid."""
+    return JSONResponse({"schemes": [
+        {"key": key, "title": preset["title"], "dark": preset["dark"],
+         "clear": preset["clear"]}
+        for key, preset in core.DIAGRAM_SCHEMES.items()]})
+
+
 @app.get("/covers")
 def covers(user: str = Depends(current_user)) -> JSONResponse:
     """Список встроенных фонов обложки."""
@@ -341,7 +350,8 @@ def _convert_png(source: dict, overrides: dict,
     sources = [b[1] for b in blocks if b[0] == "mermaid"]
     if not sources:
         raise ValueError("В тексте нет диаграммы mermaid")
-    images = core.diagram_images(sources[:1], front, chrome=chrome, dpi=220)
+    images = core.diagram_images(sources[:1], front, chrome=chrome, dpi=220,
+                                 scheme=front.get("scheme"))
     out_path = OUT_DIR / f"{uuid.uuid4().hex}.png"
     out_path.write_bytes(images[0][0])
     stem = _safe_stem(str(front.get("title") or source.get("stem") or "diagram"))
@@ -406,6 +416,7 @@ async def convert(
     style: str | None = Form(None),
     brand: str | None = Form(None),
     font: str | None = Form(None),
+    scheme: str | None = Form(None),
     format: str | None = Form(None),
     background: str | None = Form(None),
     cover: str | None = Form(None),
@@ -451,6 +462,8 @@ async def convert(
     overrides["brand"] = brands.get(brand).key
     if font and font in brands.FONT_SETS:
         overrides["font"] = font
+    if scheme and scheme in core.DIAGRAM_SCHEMES:
+        overrides["scheme"] = scheme
     if cover in ("0", "false", "off"):
         overrides["cover"] = "false"
     if numbered in ("0", "false", "off"):

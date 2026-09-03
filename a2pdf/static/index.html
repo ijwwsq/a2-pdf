@@ -71,6 +71,16 @@ header{background:var(--navy);color:#fff;padding:16px 28px;display:flex;
   font:600 12px var(--font);padding:5px 11px;border-radius:20px;cursor:pointer}
 .kinds button:hover{border-color:var(--blue);color:var(--n800)}
 .kinds button.on{border-color:var(--navy);color:var(--navy)}
+.thumb.sch{display:flex;align-items:center;justify-content:center;background:var(--n0);
+  border:1px solid var(--n200)}
+.thumb.sch i{position:static;width:22px;height:12px;border-radius:2px;
+  border:1px solid var(--navy);background:var(--blue-50);transform:none}
+.thumb.sch u{display:none}
+.thumb.sch-card{background:var(--blue-50)}
+.thumb.sch-dark{background:var(--navy);border-color:var(--navy)}
+.thumb.sch-dark i{border-color:var(--n0);background:rgba(255,255,255,.22)}
+.thumb.sch-clear{background:repeating-conic-gradient(var(--n100) 0 25%,var(--n0) 0 50%)
+  50%/12px 12px}
 .panes{min-height:196px}
 .pane{display:none}
 .pane.on{display:block}
@@ -300,7 +310,7 @@ footer{padding:14px 28px;border-top:1px solid var(--n200);background:var(--n0);
     </div>
 
     <div class="panel">
-      <h2>Шаблон</h2>
+      <h2 id="tpl-title">Шаблон</h2>
       <div class="tpls" id="templates"></div>
 
       <button type="button" class="toggle" id="toggle">Оформление документа</button>
@@ -468,6 +478,29 @@ const TEMPLATES = [
 ];
 let template = 'plain';
 
+// у схем свои шаблоны: подложка вокруг диаграммы, а не обложка документа
+const SCHEMES = [
+  {id:'plain', name:'Чистая',      note:'белый фон'},
+  {id:'card',  name:'Карточка',    note:'фирменная подложка'},
+  {id:'dark',  name:'Тёмная',      note:'для слайдов'},
+  {id:'clear', name:'Прозрачная',  note:'PNG без фона'}
+];
+let scheme = 'plain';
+
+function drawSchemes() {
+  $('templates').innerHTML = SCHEMES.map(s => `
+    <button type="button" class="tpl${s.id === scheme ? ' on' : ''}" data-sch="${s.id}">
+      <span class="thumb sch sch-${s.id}"><i></i><u class="t"></u><u class="s"></u></span>
+      <b>${s.name}</b><span class="note">${s.note}</span></button>`).join('');
+  document.querySelectorAll('[data-sch]').forEach(b =>
+    b.addEventListener('click', () => {
+      scheme = b.dataset.sch;
+      document.querySelectorAll('[data-sch]').forEach(x =>
+        x.classList.toggle('on', x.dataset.sch === scheme));
+      refresh();
+    }));
+}
+
 function drawTemplates() {
   $('templates').innerHTML = TEMPLATES.map(t => {
     const photo = t.background
@@ -579,6 +612,8 @@ document.querySelectorAll('.kinds button').forEach(b =>
       x.classList.toggle('on', x === b));
     const schema = textKind === 'mermaid';
     $('fmt-png').hidden = !schema;
+    $('tpl-title').textContent = schema ? 'Шаблон схемы' : 'Шаблон';
+    if (schema) drawSchemes(); else drawTemplates();
     if (!schema && format === 'png') setFormat('pdf');
     $('mdtext').placeholder = schema ? MERMAID_EXAMPLE
       : '# Заголовок\n\nСписки, таблицы, код и блоки ```mermaid — всё соберётся в PDF.';
@@ -667,6 +702,7 @@ $('form').addEventListener('submit', async (ev) => {
   body.append('style', $('style').value);
   body.append('format', format);
   body.append('brand', org);
+  if (textKind === 'mermaid') body.append('scheme', scheme);
   if ($('fontset') && $('fontset').value) body.append('font', $('fontset').value);
   if ($('background').value) body.append('background', $('background').value);
   if ($('photo').files[0]) body.append('photo', $('photo').files[0]);

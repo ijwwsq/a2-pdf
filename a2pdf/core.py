@@ -317,7 +317,7 @@ def _table_class(columns: int) -> str:
 
 
 def render(blocks: list[tuple], brand: brands.Brand, numbered: bool = True,
-           drop_h1: bool = True) -> str:
+           drop_h1: bool = True, scheme: str | None = None) -> str:
     out: list[str] = []
     n = 0
     for b in blocks:
@@ -349,8 +349,11 @@ def render(blocks: list[tuple], brand: brands.Brand, numbered: bool = True,
         elif kind == "code":
             out.append(f'<pre class="code"><code>{html.escape(b[2])}</code></pre>')
         elif kind == "mermaid":
-            out.append('<div class="dg dg-mermaid"><pre class="mermaid">'
-                       f'{html.escape(theme_diagram(b[1], brand))}</pre></div>')
+            preset = diagram_scheme(scheme)
+            out.append(f'<div class="dg dg-mermaid sch-{scheme or "plain"}">'
+                       '<pre class="mermaid">'
+                       f'{html.escape(theme_diagram(b[1], brand, preset["dark"]))}'
+                       "</pre></div>")
         elif kind == "note":
             out.append(f'<div class="note"><p>{inline(b[1])}</p></div>')
         elif kind == "table":
@@ -501,6 +504,9 @@ tbody tr:nth-child(even) td{background:var(--n50)}
 .dg{border:.25mm solid var(--n200);border-radius:2mm;background:var(--n0);padding:6mm;
     margin:0 0 5mm;break-inside:avoid}
 .dg-mermaid{text-align:center;padding:4mm}
+.dg.sch-card{background:var(--brand-50)}
+.dg.sch-dark{background:var(--brand-dark);border-color:var(--brand-dark)}
+.dg.sch-clear{background:none;border:0}
 .dg-mermaid svg{max-width:100%;max-height:198mm;width:auto;height:auto}
 .fig{margin:0 0 5mm;text-align:center;break-inside:avoid}
 .fig img{max-width:100%;max-height:150mm;border-radius:1.4mm}
@@ -536,13 +542,45 @@ tbody tr:nth-child(even) td{background:var(--n50)}
 .part .ttl{font-size:13pt;font-weight:700;color:var(--brand);letter-spacing:-.3px}
 """
 
+def tint(color: str, alpha: float) -> str:
+    """Цвет с прозрачностью в виде #RRGGBBAA — запятых внутри значения нет,
+    поэтому его можно писать и в classDef."""
+    return color + format(round(max(0.0, min(1.0, alpha)) * 255), "02X")
+
+
+DIAGRAM_SCHEMES = {
+    "plain": {"title": "Чистая", "dark": False, "clear": False,
+              "css": "background:#FFFFFF"},
+    "card": {"title": "Карточка", "dark": False, "clear": False,
+             "css": "background:var(--brand-50);border:.3mm solid var(--n200);"
+                    "border-radius:3mm;padding:10mm"},
+    "dark": {"title": "Тёмная", "dark": True, "clear": False,
+             "css": "background:var(--brand-dark);border-radius:3mm;"
+                    "padding:10mm"},
+    "clear": {"title": "Прозрачная", "dark": False, "clear": True,
+              "css": "background:none"},
+}
+
+
+def diagram_scheme(key: str | None) -> dict:
+    return DIAGRAM_SCHEMES.get(str(key or "plain"), DIAGRAM_SCHEMES["plain"])
+
+
 DIAGRAM_STYLE = re.compile(r"^\s*(classDef|style)\s+(\S+)", re.MULTILINE)
 DIAGRAM_COLOR = re.compile(r"\b(fill|stroke|color)\s*:\s*#[0-9A-Fa-f]{3,8}")
 
 
-def diagram_palette(brand: brands.Brand) -> list[tuple[str, str, str]]:
+def diagram_palette(brand: brands.Brand,
+                    on_dark: bool = False) -> list[tuple[str, str, str]]:
     """Заливка, обводка и текст для групп узлов — по паре на каждый класс."""
     c = brand.colors
+    n = brand.neutrals
+    if on_dark:
+        return [(tint(c["accent"], .26), c["accent"], n["n0"]),
+                (tint(n["n0"], .12), n["n200"], n["n0"]),
+                (tint(c["mark"], .26), c["mark"], n["n0"]),
+                (tint(c["accent"], .40), c["accent_50"], n["n0"]),
+                (tint(n["n0"], .20), n["n0"], n["n0"])]
     return [(c["accent_50"], c["accent"], c["brand"]),
             (c["brand_50"], c["brand"], c["brand"]),
             (c["mark_50"], c["mark"], c["brand"]),
@@ -550,10 +588,10 @@ def diagram_palette(brand: brands.Brand) -> list[tuple[str, str, str]]:
             (c["brand_100"], c["brand_dark"], c["brand"])]
 
 
-def theme_diagram(src: str, brand: brands.Brand) -> str:
+def theme_diagram(src: str, brand: brands.Brand, on_dark: bool = False) -> str:
     """Свои цвета в classDef и style перекрывают тему mermaid, поэтому
     подменяем их палитрой бренда: группы узлов остаются различимыми."""
-    palette = diagram_palette(brand)
+    palette = diagram_palette(brand, on_dark)
     order: dict[str, int] = {}
     for _, name in DIAGRAM_STYLE.findall(src):
         order.setdefault(name, len(order))
@@ -572,10 +610,26 @@ def theme_diagram(src: str, brand: brands.Brand) -> str:
     return "\n".join(repaint(line) for line in src.splitlines())
 
 
-def mermaid_init(brand: brands.Brand,
-                 fonts: brands.Fonts | None = None) -> str:
+def mermaid_init(brand: brands.Brand, fonts: brands.Fonts | None = None,
+                 on_dark: bool = False) -> str:
     """Тема mermaid в цветах бренда и выбранных шрифтах."""
     fonts = fonts or brand.fonts
+    colors = dict(brand.colors)
+    neutrals = dict(brand.neutrals)
+    white = brand.neutrals["n0"]
+    if on_dark:
+        # на тёмной подложке роли меняются местами: подложки узлов становятся
+        # полупрозрачными, а весь текст и линии — светлыми
+        colors |= {"accent_50": tint(colors["accent"], .26),
+                   "mark_50": tint(colors["mark"], .26),
+                   "brand": white, "accent": colors["accent_50"],
+                   "mark": colors["mark"]}
+        neutrals |= {"n50": tint(white, .10), "n200": tint(white, .30),
+                     "n400": tint(white, .50), "n500": tint(white, .62),
+                     "n700": white}
+    # прозрачность mermaid тут не берёт, поэтому подпись ребра красим
+    # в цвет самой подложки
+    edge_label_bg = brand.colors["brand_dark"] if on_dark else "#FFFFFF"
     return """
 mermaid.initialize({
   startOnLoad:false, theme:'base', securityLevel:'loose',
@@ -588,7 +642,7 @@ mermaid.initialize({
     secondaryColor:'%(n50)s', tertiaryColor:'%(mark_50)s',
     lineColor:'%(n500)s', textColor:'%(n700)s',
     mainBkg:'%(accent_50)s', nodeBorder:'%(accent)s', clusterBkg:'%(n50)s',
-    clusterBorder:'%(n200)s', edgeLabelBackground:'#FFFFFF',
+    clusterBorder:'%(n200)s', edgeLabelBackground:'%(edge_label_bg)s',
     actorBkg:'%(brand)s', actorBorder:'%(brand)s', actorTextColor:'#FFFFFF',
     actorLineColor:'%(n400)s', signalColor:'%(n700)s',
     signalTextColor:'%(n700)s',
@@ -623,6 +677,9 @@ for (const box of document.querySelectorAll('.dg-mermaid foreignObject')) {
   if (need > have) {
     box.setAttribute('width', need);
     box.setAttribute('x', box.x.baseVal.value - (need - have) / 2);
+    // подпись сохраняет прежнюю ширину и без этого прижимается к левому краю
+    label.style.width = need + 'px';
+    label.style.textAlign = 'center';
   }
 }
 
@@ -636,7 +693,8 @@ for (const svg of document.querySelectorAll('.dg-mermaid svg')) {
   svg.style.width = 'auto';
   svg.style.height = 'auto';
 }
-""" % {"body": fonts.body, **brand.colors, **brand.neutrals}
+""" % {"body": fonts.body, "edge_label_bg": edge_label_bg,
+       **colors, **neutrals}
 
 
 COVER_TPL = """<!doctype html>
@@ -854,14 +912,16 @@ def render_pdf(blocks: list[tuple], front: dict, out_path: pathlib.Path,
     brand = brands.get(front.get("brand"))
     fonts = brands.fonts_for(brand, front.get("font"))
     fonts_css = fonts_css_path(fonts.key).read_text(encoding="utf-8")
-    content = render(blocks, brand, numbered=numbered)
+    scheme = front.get("scheme")
+    content = render(blocks, brand, numbered=numbered, scheme=scheme)
 
     mermaid_tag = ""
     if has_mermaid:
         lib = (ASSETS / "mermaid.min.js").read_text(encoding="utf-8")
         mermaid_tag = (f"<script>{lib}</script>"
                        f"<script type=\"module\">"
-                       f"{mermaid_init(brand, fonts)}</script>")
+                       f"{mermaid_init(brand, fonts, diagram_scheme(scheme)['dark'])}"
+                       "</script>")
 
     stem = re.sub(r"[^\w.-]+", "_", name)[:50] + f"-{os.getpid()}-{id(blocks) & 0xffff:x}"
     body_html = TMP / f"{stem}-body.html"
@@ -895,26 +955,31 @@ def render_pdf(blocks: list[tuple], front: dict, out_path: pathlib.Path,
     return result
 
 
-def diagram_html(sources: list[str], brand: brands.Brand,
-                 fonts: brands.Fonts) -> str:
+def diagram_html(sources: list[str], brand: brands.Brand, fonts: brands.Fonts,
+                 scheme: str | None = None) -> str:
     """Страница с диаграммами: по одной на лист, в цветах бренда."""
+    preset = diagram_scheme(scheme)
     fonts_css = fonts_css_path(fonts.key).read_text(encoding="utf-8")
     lib = (ASSETS / "mermaid.min.js").read_text(encoding="utf-8")
     body = "".join(
         '<div class="page"><div class="dg dg-mermaid"><pre class="mermaid">'
-        f"{html.escape(theme_diagram(src, brand))}</pre></div></div>"
-        for src in sources)
+        f'{html.escape(theme_diagram(src, brand, preset["dark"]))}'
+        "</pre></div></div>" for src in sources)
     return ('<!doctype html><html lang="ru"><head><meta charset="utf-8">'
             f"<style>{fonts_css}</style>"
             f"<style>{brands.tokens(brand, fonts)}{BODY_CSS}"
             "@page{size:A4;margin:8mm}"
+            "body{background:none}"
             ".page{break-after:page;display:flex;align-items:center;"
             "justify-content:center;height:281mm}"
-            ".dg{border:0;background:none;margin:0;padding:0;width:100%}"
+            ".dg{border:0;margin:0;padding:4mm;width:100%;"
+            f'{preset["css"]}'
+            "}"
             ".dg-mermaid svg{max-height:275mm}"
             f"</style></head><body>{body}"
             f"<script>{lib}</script>"
-            f'<script type="module">{mermaid_init(brand, fonts)}</script>'
+            '<script type="module">'
+            f'{mermaid_init(brand, fonts, preset["dark"])}</script>'
             "</body></html>")
 
 
@@ -932,8 +997,8 @@ def content_box(page) -> pymupdf.Rect:
 
 
 def diagram_images(sources: list[str], front: dict, chrome: str | None = None,
-                   dpi: int = 150,
-                   name: str = "diagram") -> list[tuple[bytes, float]]:
+                   dpi: int = 150, name: str = "diagram",
+                   scheme: str | None = None) -> list[tuple[bytes, float]]:
     """Картинки диаграмм и соотношение сторон каждой."""
     if not sources:
         return []
@@ -945,13 +1010,17 @@ def diagram_images(sources: list[str], front: dict, chrome: str | None = None,
     stem = re.sub(r"[^\w.-]+", "_", name)[:40] + f"-{os.getpid()}"
     html_path = TMP / f"{stem}-dg.html"
     pdf_path = TMP / f"{stem}-dg.pdf"
-    html_path.write_text(diagram_html(sources, brand, fonts), encoding="utf-8")
+    key = scheme if scheme is not None else front.get("scheme")
+    preset = diagram_scheme(key)
+    html_path.write_text(diagram_html(sources, brand, fonts, key),
+                         encoding="utf-8")
     try:
         print_pdf(html_path, pdf_path, chrome, 15000)
         images = []
         with pymupdf.open(pdf_path) as doc:
             for page in doc:
-                pixmap = page.get_pixmap(dpi=dpi, clip=content_box(page))
+                pixmap = page.get_pixmap(dpi=dpi, clip=content_box(page),
+                                         alpha=preset["clear"])
                 images.append((pixmap.tobytes("png"),
                                pixmap.height / max(pixmap.width, 1)))
         return images
