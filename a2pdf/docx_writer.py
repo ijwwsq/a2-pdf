@@ -186,66 +186,10 @@ def _plain(text: str) -> str:
     return re.sub(r"[*`]", "", str(text))
 
 
-def _content_box(page) -> pymupdf.Rect:
-    """Прямоугольник вокруг нарисованного — чтобы не тащить поля страницы."""
-    box = pymupdf.Rect()
-    for drawing in page.get_drawings():
-        box |= drawing["rect"]
-    for word in page.get_text("words"):
-        box |= pymupdf.Rect(word[:4])
-    if box.is_empty or box.is_infinite:
-        return page.rect
-    box += (-6, -6, 6, 6)          # немного воздуха вокруг схемы
-    return box & page.rect
-
-
-def _pages_to_png(html_text: str, chrome: str, name: str,
-                  wait_ms: int = 15000,
-                  crop: bool = False) -> list[tuple[bytes, float]]:
-    """Возвращает картинки страниц и соотношение сторон каждой."""
-    core.TMP.mkdir(parents=True, exist_ok=True)
-    html_path = core.TMP / f"{name}.html"
-    pdf_path = core.TMP / f"{name}.pdf"
-    html_path.write_text(html_text, encoding="utf-8")
-    try:
-        core.print_pdf(html_path, pdf_path, chrome, wait_ms)
-        images = []
-        with pymupdf.open(pdf_path) as doc:
-            for page in doc:
-                clip = _content_box(page) if crop else None
-                pixmap = page.get_pixmap(dpi=DPI, clip=clip)
-                images.append((pixmap.tobytes("png"),
-                               pixmap.height / max(pixmap.width, 1)))
-        return images
-    finally:
-        html_path.unlink(missing_ok=True)
-        pdf_path.unlink(missing_ok=True)
-
-
 def _diagram_images(sources: list[str], theme: "Theme", chrome: str,
                     name: str) -> list[tuple[bytes, float]]:
-    if not sources:
-        return []
-    brand = theme.brand
-    fonts = core.fonts_css_path(theme.fonts.key).read_text(encoding="utf-8")
-    lib = (core.ASSETS / "mermaid.min.js").read_text(encoding="utf-8")
-    body = "".join(
-        '<div class="page"><div class="dg dg-mermaid"><pre class="mermaid">'
-        f'{html_mod.escape(src)}</pre></div></div>' for src in sources)
-    page = (f'<!doctype html><html lang="ru"><head><meta charset="utf-8">'
-            f'<style>{fonts}</style>'
-            f'<style>{brands.tokens(brand, theme.fonts)}{core.BODY_CSS}'
-            '@page{size:A4;margin:8mm}'
-            '.page{break-after:page;display:flex;align-items:center;'
-            'justify-content:center;height:281mm}'
-            '.dg{border:0;background:none;margin:0;padding:0;width:100%}'
-            '.dg-mermaid svg{max-height:275mm}'
-            f'</style></head><body>{body}'
-            f'<script>{lib}</script>'
-            f'<script type="module">'
-            f'{core.mermaid_init(brand, theme.fonts)}</script>'
-            '</body></html>')
-    return _pages_to_png(page, chrome, f"{name}-diagrams", crop=True)
+    front = {"brand": theme.brand.key, "font": theme.fonts.key}
+    return core.diagram_images(sources, front, chrome=chrome, dpi=DPI, name=name)
 
 
 def _load_image(src: str) -> bytes | None:

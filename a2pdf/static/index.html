@@ -66,6 +66,11 @@ header{background:var(--navy);color:#fff;padding:16px 28px;display:flex;
 .tabs button:hover{color:var(--n800)}
 .tabs button.on{background:var(--n0);color:var(--navy);box-shadow:var(--sh-sm)}
 .tabs svg{width:15px;height:15px}
+.kinds{display:flex;gap:6px;margin-bottom:10px}
+.kinds button{border:1px solid var(--n200);background:var(--n0);color:var(--n500);
+  font:600 12px var(--font);padding:5px 11px;border-radius:20px;cursor:pointer}
+.kinds button:hover{border-color:var(--blue);color:var(--n800)}
+.kinds button.on{border-color:var(--navy);color:var(--navy)}
 .panes{min-height:196px}
 .pane{display:none}
 .pane.on{display:block}
@@ -276,6 +281,10 @@ footer{padding:14px 28px;border-top:1px solid var(--n200);background:var(--n0);
         </div>
 
         <div class="pane" id="pane-text">
+          <div class="kinds">
+            <button type="button" class="on" data-kind="md">Markdown</button>
+            <button type="button" data-kind="mermaid">Схема mermaid</button>
+          </div>
           <textarea class="md" id="mdtext" spellcheck="false" placeholder="# Заголовок
 
 Списки, таблицы, код и блоки ```mermaid — всё соберётся в PDF."></textarea>
@@ -357,6 +366,7 @@ footer{padding:14px 28px;border-top:1px solid var(--n200);background:var(--n0);
       <div class="formats">
         <button type="button" class="fmt on" data-fmt="pdf">PDF</button>
         <button type="button" class="fmt" data-fmt="docx">Word</button>
+        <button type="button" class="fmt" data-fmt="png" id="fmt-png" hidden>PNG</button>
       </div>
 
       <div class="go">
@@ -392,6 +402,7 @@ const fileInput = $('file'), drop = $('drop'), chosen = $('chosen'), status = $(
 let tab = 'pane-file';
 let format = 'pdf';
 let org = localStorage.getItem('a2pdf-brand') || 'a2data';
+let textKind = 'md';
 let ORGS = [];
 
 function paint(brand) {
@@ -427,12 +438,7 @@ fetch('/brands').then(r => r.json()).then(data => {
 let lastUrl = null;
 
 document.querySelectorAll('.formats button').forEach(b =>
-  b.addEventListener('click', () => {
-    format = b.dataset.fmt;
-    document.querySelectorAll('.formats button').forEach(x =>
-      x.classList.toggle('on', x === b));
-    $('submit').textContent = format === 'docx' ? 'Собрать Word' : 'Собрать PDF';
-  }));
+  b.addEventListener('click', () => setFormat(b.dataset.fmt)));
 
 /* ---------- источник ---------- */
 function switchTab(pane) {
@@ -562,6 +568,31 @@ function restore() {
 REMEMBER.forEach(k => { if ($(k)) $(k).addEventListener('change', save); });
 
 /* ---------- готовность ---------- */
+const MERMAID_EXAMPLE = `flowchart LR
+    A[Источник] --> B[ETL]
+    B --> C[(Витрина)]`;
+
+document.querySelectorAll('.kinds button').forEach(b =>
+  b.addEventListener('click', () => {
+    textKind = b.dataset.kind;
+    document.querySelectorAll('.kinds button').forEach(x =>
+      x.classList.toggle('on', x === b));
+    const schema = textKind === 'mermaid';
+    $('fmt-png').hidden = !schema;
+    if (!schema && format === 'png') setFormat('pdf');
+    $('mdtext').placeholder = schema ? MERMAID_EXAMPLE
+      : '# Заголовок\n\nСписки, таблицы, код и блоки ```mermaid — всё соберётся в PDF.';
+    refresh();
+  }));
+
+function setFormat(key) {
+  format = key;
+  document.querySelectorAll('.formats button').forEach(x =>
+    x.classList.toggle('on', x.dataset.fmt === key));
+  $('submit').textContent = key === 'docx' ? 'Собрать Word'
+    : key === 'png' ? 'Собрать картинку' : 'Собрать PDF';
+}
+
 function ready() {
   if (tab === 'pane-file') return !!fileInput.files[0];
   if (tab === 'pane-text') return $('mdtext').value.trim().length > 0;
@@ -622,7 +653,14 @@ $('form').addEventListener('submit', async (ev) => {
   if (!ready()) return;
   const body = new FormData();
   if (tab === 'pane-file') body.append('file', fileInput.files[0]);
-  else if (tab === 'pane-text') body.append('text', $('mdtext').value);
+  else if (tab === 'pane-text') {
+    const raw = $('mdtext').value;
+    // схему заворачиваем в блок mermaid, чтобы она отрисовалась, а не легла кодом
+    const wrapped = (textKind === 'mermaid' && !/^\s*```/.test(raw))
+      ? '```mermaid\n' + raw.trim() + '\n```'
+      : raw;
+    body.append('text', wrapped);
+  }
   else body.append('url', $('url').value.trim());
   ['title','subtitle','kicker','index','header','footer','confidential','meta']
     .forEach(k => { const v = $(k).value.trim(); if (v) body.append(k, v); });
@@ -650,7 +688,7 @@ $('form').addEventListener('submit', async (ev) => {
     const blob = await res.blob();
     const cd = res.headers.get('Content-Disposition') || '';
     const guess = decodeURIComponent((cd.match(/filename\*?=(?:UTF-8'')?"?([^";]+)/) || [])[1] || '');
-    const ext = format === 'docx' ? '.docx' : '.pdf';
+    const ext = format === 'docx' ? '.docx' : format === 'png' ? '.png' : '.pdf';
     const base = (tab === 'pane-file' && fileInput.files[0])
       ? fileInput.files[0].name.replace(/\.(md|markdown|docx)$/i, '')
       : ($('title').value.trim() || '');
@@ -664,7 +702,13 @@ $('form').addEventListener('submit', async (ev) => {
     $('rdl').href = lastUrl; $('rdl').download = name; $('rdl').hidden = false;
     $('ropen').hidden = false;
     $('ropen').onclick = () => window.open(lastUrl, '_blank');
-    if (format === 'docx') {
+    if (format === 'png') {
+      $('rframe').classList.remove('show');
+      $('rframe').removeAttribute('src');
+      $('empty').style.display = '';
+      $('empty').innerHTML =
+        `<img src="${lastUrl}" alt="" style="max-width:100%;max-height:100%">`;
+    } else if (format === 'docx') {
       $('rframe').classList.remove('show');
       $('rframe').removeAttribute('src');
       $('empty').style.display = '';

@@ -316,7 +316,7 @@ def _table_class(columns: int) -> str:
     return ""
 
 
-def render(blocks: list[tuple], numbered: bool = True,
+def render(blocks: list[tuple], brand: brands.Brand, numbered: bool = True,
            drop_h1: bool = True) -> str:
     out: list[str] = []
     n = 0
@@ -350,7 +350,7 @@ def render(blocks: list[tuple], numbered: bool = True,
             out.append(f'<pre class="code"><code>{html.escape(b[2])}</code></pre>')
         elif kind == "mermaid":
             out.append('<div class="dg dg-mermaid"><pre class="mermaid">'
-                       f'{html.escape(b[1])}</pre></div>')
+                       f'{html.escape(theme_diagram(b[1], brand))}</pre></div>')
         elif kind == "note":
             out.append(f'<div class="note"><p>{inline(b[1])}</p></div>')
         elif kind == "table":
@@ -536,6 +536,42 @@ tbody tr:nth-child(even) td{background:var(--n50)}
 .part .ttl{font-size:13pt;font-weight:700;color:var(--brand);letter-spacing:-.3px}
 """
 
+DIAGRAM_STYLE = re.compile(r"^\s*(classDef|style)\s+(\S+)", re.MULTILINE)
+DIAGRAM_COLOR = re.compile(r"\b(fill|stroke|color)\s*:\s*#[0-9A-Fa-f]{3,8}")
+
+
+def diagram_palette(brand: brands.Brand) -> list[tuple[str, str, str]]:
+    """Заливка, обводка и текст для групп узлов — по паре на каждый класс."""
+    c = brand.colors
+    return [(c["accent_50"], c["accent"], c["brand"]),
+            (c["brand_50"], c["brand"], c["brand"]),
+            (c["mark_50"], c["mark"], c["brand"]),
+            (c["accent_100"], c["accent_dark"], c["brand"]),
+            (c["brand_100"], c["brand_dark"], c["brand"])]
+
+
+def theme_diagram(src: str, brand: brands.Brand) -> str:
+    """Свои цвета в classDef и style перекрывают тему mermaid, поэтому
+    подменяем их палитрой бренда: группы узлов остаются различимыми."""
+    palette = diagram_palette(brand)
+    order: dict[str, int] = {}
+    for _, name in DIAGRAM_STYLE.findall(src):
+        order.setdefault(name, len(order))
+    if not order:
+        return src
+
+    def repaint(line: str) -> str:
+        head = DIAGRAM_STYLE.match(line)
+        if not head:
+            return line
+        fill, stroke, text = palette[order[head.group(2)] % len(palette)]
+        colors = {"fill": fill, "stroke": stroke, "color": text}
+        return DIAGRAM_COLOR.sub(
+            lambda m: f"{m.group(1)}:{colors[m.group(1)]}", line)
+
+    return "\n".join(repaint(line) for line in src.splitlines())
+
+
 def mermaid_init(brand: brands.Brand,
                  fonts: brands.Fonts | None = None) -> str:
     """Тема mermaid в цветах бренда и выбранных шрифтах."""
@@ -562,7 +598,33 @@ mermaid.initialize({
     noteTextColor:'%(brand)s', altBackground:'%(n50)s'
   }
 });
+// Ширину узлов mermaid считает по метрикам шрифта. Пока текста этим шрифтом
+// на странице нет, браузер его не запрашивает, поэтому просим начертания сами:
+// иначе подписи меряются запасным шрифтом и не влезают в рамку.
+await Promise.all(['400 13px "%(body)s"', '600 13px "%(body)s"']
+  .map(f => document.fonts.load(f).catch(() => {})));
+await document.fonts.ready;
 await mermaid.run();
+
+// Метрики всё равно расходятся на доли пикселя, и подпись обрезается
+// по краю контейнера: измеряем её на месте и расширяем контейнер симметрично.
+for (const box of document.querySelectorAll('.dg-mermaid foreignObject')) {
+  const label = box.firstElementChild;
+  if (!label) continue;
+  label.style.overflow = 'visible';
+  // многострочная подпись переносится по текущей ширине, поэтому её настоящую
+  // ширину видно только при max-content
+  const width = label.style.width;
+  label.style.width = 'max-content';
+  const loose = label.getBoundingClientRect().width;
+  label.style.width = width;
+  const need = Math.ceil(Math.max(loose, label.scrollWidth)) + 8;
+  const have = box.width.baseVal.value;
+  if (need > have) {
+    box.setAttribute('width', need);
+    box.setAttribute('x', box.x.baseVal.value - (need - have) / 2);
+  }
+}
 
 // Диаграмма должна влезать в страницу целиком: снимаем размеры, которые
 // mermaid проставил инлайном, и ограничиваем высоту доступной областью.
@@ -792,7 +854,7 @@ def render_pdf(blocks: list[tuple], front: dict, out_path: pathlib.Path,
     brand = brands.get(front.get("brand"))
     fonts = brands.fonts_for(brand, front.get("font"))
     fonts_css = fonts_css_path(fonts.key).read_text(encoding="utf-8")
-    content = render(blocks, numbered=numbered)
+    content = render(blocks, brand, numbered=numbered)
 
     mermaid_tag = ""
     if has_mermaid:
@@ -831,6 +893,71 @@ def render_pdf(blocks: list[tuple], front: dict, out_path: pathlib.Path,
     for tmp in TMP.glob(f"{stem}-*"):  # промежуточные html/pdf не нужны
         tmp.unlink(missing_ok=True)
     return result
+
+
+def diagram_html(sources: list[str], brand: brands.Brand,
+                 fonts: brands.Fonts) -> str:
+    """Страница с диаграммами: по одной на лист, в цветах бренда."""
+    fonts_css = fonts_css_path(fonts.key).read_text(encoding="utf-8")
+    lib = (ASSETS / "mermaid.min.js").read_text(encoding="utf-8")
+    body = "".join(
+        '<div class="page"><div class="dg dg-mermaid"><pre class="mermaid">'
+        f"{html.escape(theme_diagram(src, brand))}</pre></div></div>"
+        for src in sources)
+    return ('<!doctype html><html lang="ru"><head><meta charset="utf-8">'
+            f"<style>{fonts_css}</style>"
+            f"<style>{brands.tokens(brand, fonts)}{BODY_CSS}"
+            "@page{size:A4;margin:8mm}"
+            ".page{break-after:page;display:flex;align-items:center;"
+            "justify-content:center;height:281mm}"
+            ".dg{border:0;background:none;margin:0;padding:0;width:100%}"
+            ".dg-mermaid svg{max-height:275mm}"
+            f"</style></head><body>{body}"
+            f"<script>{lib}</script>"
+            f'<script type="module">{mermaid_init(brand, fonts)}</script>'
+            "</body></html>")
+
+
+def content_box(page) -> pymupdf.Rect:
+    """Прямоугольник вокруг нарисованного — чтобы не тащить поля страницы."""
+    box = pymupdf.Rect()
+    for drawing in page.get_drawings():
+        box |= drawing["rect"]
+    for word in page.get_text("words"):
+        box |= pymupdf.Rect(word[:4])
+    if box.is_empty or box.is_infinite:
+        return page.rect
+    box += (-6, -6, 6, 6)
+    return box & page.rect
+
+
+def diagram_images(sources: list[str], front: dict, chrome: str | None = None,
+                   dpi: int = 150,
+                   name: str = "diagram") -> list[tuple[bytes, float]]:
+    """Картинки диаграмм и соотношение сторон каждой."""
+    if not sources:
+        return []
+    ensure_assets(quiet=True)
+    chrome = chrome or find_chrome()
+    brand = brands.get(front.get("brand"))
+    fonts = brands.fonts_for(brand, front.get("font"))
+    TMP.mkdir(parents=True, exist_ok=True)
+    stem = re.sub(r"[^\w.-]+", "_", name)[:40] + f"-{os.getpid()}"
+    html_path = TMP / f"{stem}-dg.html"
+    pdf_path = TMP / f"{stem}-dg.pdf"
+    html_path.write_text(diagram_html(sources, brand, fonts), encoding="utf-8")
+    try:
+        print_pdf(html_path, pdf_path, chrome, 15000)
+        images = []
+        with pymupdf.open(pdf_path) as doc:
+            for page in doc:
+                pixmap = page.get_pixmap(dpi=dpi, clip=content_box(page))
+                images.append((pixmap.tobytes("png"),
+                               pixmap.height / max(pixmap.width, 1)))
+        return images
+    finally:
+        html_path.unlink(missing_ok=True)
+        pdf_path.unlink(missing_ok=True)
 
 
 def render_document(blocks: list[tuple], front: dict, out_path: pathlib.Path,

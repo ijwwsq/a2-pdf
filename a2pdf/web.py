@@ -46,7 +46,8 @@ ALLOWED = {".md", ".markdown", ".docx"}
 PHOTO_TYPES = {".jpg", ".jpeg", ".png", ".webp"}
 MIME = {"pdf": "application/pdf",
         "docx": "application/vnd.openxmlformats-officedocument"
-                ".wordprocessingml.document"}
+                ".wordprocessingml.document",
+        "png": "image/png"}
 COVERS = core.ASSETS / "covers"          # встроенные фоны обложки
 
 STATIC = pathlib.Path(__file__).resolve().parent / "static"
@@ -314,9 +315,45 @@ def _overrides(**fields: str | None) -> dict:
     return out
 
 
+def _blocks_of(source: dict, overrides: dict) -> tuple[list[tuple], dict]:
+    """Блоки документа и настройки обложки для любого источника."""
+    kind = source["kind"]
+    if kind == "file" and source["suffix"] == ".docx":
+        blocks, front = docx_to_blocks(source["data"])
+        front.setdefault("title", source["stem"])
+    elif kind in ("file", "text"):
+        text = (source["data"].decode("utf-8-sig", errors="replace")
+                if kind == "file" else source["text"])
+        front, body = core.split_front_matter(text)
+        blocks = core.parse(body)
+    else:
+        url = source["url"]
+        blocks, front = (notion.load(url) if notion.is_notion(url)
+                         else fetch(url))
+    front.update(overrides)
+    return blocks, front
+
+
+def _convert_png(source: dict, overrides: dict,
+                 chrome: str) -> tuple[pathlib.Path, str]:
+    """Схему отдаём картинкой: берём первую диаграмму документа."""
+    blocks, front = _blocks_of(source, overrides)
+    sources = [b[1] for b in blocks if b[0] == "mermaid"]
+    if not sources:
+        raise ValueError("В тексте нет диаграммы mermaid")
+    images = core.diagram_images(sources[:1], front, chrome=chrome, dpi=220)
+    out_path = OUT_DIR / f"{uuid.uuid4().hex}.png"
+    out_path.write_bytes(images[0][0])
+    stem = _safe_stem(str(front.get("title") or source.get("stem") or "diagram"))
+    return out_path, stem
+
+
 def _convert(source: dict, overrides: dict, chrome: str,
              fmt: str = "pdf") -> tuple[pathlib.Path, str]:
     """Собирает документ и возвращает путь и предлагаемое имя файла."""
+    if fmt == "png":
+        return _convert_png(source, overrides, chrome)
+
     out_path = OUT_DIR / f"{uuid.uuid4().hex}.{fmt}"
     kind = source["kind"]
 
@@ -374,7 +411,9 @@ async def convert(
     cover: str | None = Form(None),
     numbered: str | None = Form(None),
 ):
-    fmt = "docx" if (format or "").lower() in ("docx", "word") else "pdf"
+    requested = (format or "").lower()
+    fmt = ("docx" if requested in ("docx", "word")
+           else "png" if requested in ("png", "image") else "pdf")
     client = _client(request)
     if not _rate_ok(client):
         raise HTTPException(429, "Слишком много запросов, попробуйте через минуту")
