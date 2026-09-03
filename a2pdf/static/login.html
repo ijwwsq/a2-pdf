@@ -25,7 +25,9 @@ body::after{content:"";position:absolute;top:-200px;right:-160px;width:520px;hei
 
 .card{position:relative;z-index:1;width:100%;max-width:380px;background:var(--n0);
       border-radius:16px;padding:32px;box-shadow:0 24px 60px rgba(6,23,59,.35)}
-.logo{height:22px;width:auto;display:block;margin-bottom:24px}
+.brands{display:flex;align-items:center;gap:16px;margin-bottom:24px;min-height:20px}
+.brands img{height:18px;width:auto;display:block}
+.brands span{width:1px;height:16px;background:var(--n200)}
 h1{font-size:20px;font-weight:700;color:var(--navy);letter-spacing:-.4px}
 .lead{font-size:13.5px;color:var(--n500);margin:6px 0 22px}
 
@@ -44,9 +46,9 @@ button:hover{background:var(--navy-900)}
 </head>
 <body>
   <form class="card" method="post" action="/login">
-    <img class="logo" src="/logo/a2data-color.svg" alt="">
+    <div class="brands" id="brands"></div>
     <h1>Вход в сервис</h1>
-    <p class="lead">Внутренний инструмент: сборка фирменных документов.</p>
+    <p class="lead">Сборка фирменных документов: PDF и Word по брендбуку.</p>
     {{error}}
     <label for="username">Логин</label>
     <input id="username" name="username" autocomplete="username" autofocus required>
@@ -54,7 +56,14 @@ button:hover{background:var(--navy-900)}
     <input id="password" name="password" type="password"
            autocomplete="current-password" required>
     <button type="submit">Войти</button>
-    <div class="foot">A2DATA · BECLOUD.AI</div>
+    <div class="foot">Внутренний сервис</div>
   </form>
+<script>
+fetch('/brands-public').then(r => r.json()).then(data => {
+  const box = document.getElementById('brands');
+  box.innerHTML = (data.brands || []).map((b, i) =>
+    (i ? '<span></span>' : '') + `<img src="/logo/${b}-color.svg" alt="">`).join('');
+}).catch(() => {});
+</script>
 </body>
 </html>

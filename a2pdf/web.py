@@ -149,6 +149,12 @@ def _same_origin(request: Request) -> bool:
     return True     # запросы без Origin: curl и подобное
 
 
+@app.get("/brands-public")
+def brands_public() -> JSONResponse:
+    """Названия брендов для страницы входа: логотипы и ничего больше."""
+    return JSONResponse({"brands": [b.logo for b in brands.BRANDS.values()]})
+
+
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request,
                session: str | None = Cookie(default=None, alias=auth.COOKIE)):

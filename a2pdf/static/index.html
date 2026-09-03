@@ -32,12 +32,14 @@ header{background:var(--navy);color:#fff;padding:16px 28px;display:flex;
        border-bottom:3px solid var(--amber);flex:none}
 .wordmark{height:16px;width:auto;display:block}
 .head-right{display:flex;align-items:center;gap:14px}
-.orgs{display:flex;gap:2px;background:rgba(255,255,255,.12);padding:3px;
-      border-radius:var(--r-md)}
-.orgs button{border:0;background:none;color:rgba(255,255,255,.72);
-  font:600 12.5px var(--font);padding:6px 12px;border-radius:6px;cursor:pointer}
-.orgs button:hover{color:#fff}
-.orgs button.on{background:#fff;color:var(--navy)}
+.orgs{display:flex;gap:6px}
+.orgs button{display:flex;align-items:center;gap:7px;border:1px solid var(--n200);
+  background:var(--n0);color:var(--n500);font:600 12.5px var(--font);
+  padding:5px 11px;border-radius:20px;cursor:pointer;transition:border-color .15s,
+  color .15s}
+.orgs button:hover{border-color:var(--blue);color:var(--n800)}
+.orgs button.on{border-color:var(--navy);color:var(--navy)}
+.orgs .dot{width:9px;height:9px;border-radius:50%;flex:none}
 .exit{border:1px solid rgba(255,255,255,.28);background:none;color:rgba(255,255,255,.8);
   font:500 12.5px var(--font);padding:6px 12px;border-radius:var(--r-md);cursor:pointer}
 .exit:hover{border-color:#fff;color:#fff}
@@ -52,6 +54,9 @@ header{background:var(--navy);color:#fff;padding:16px 28px;display:flex;
 .panel + .panel{margin-top:14px}
 .panel h2{font-size:11px;font-weight:600;letter-spacing:1.4px;text-transform:uppercase;
           color:var(--n400);margin-bottom:12px}
+.panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;
+            margin-bottom:12px}
+.panel-head h2{margin-bottom:0}
 
 .tabs{display:flex;gap:2px;background:var(--n100);padding:3px;border-radius:var(--r-md);
       margin-bottom:14px}
@@ -232,7 +237,6 @@ footer{padding:14px 28px;border-top:1px solid var(--n200);background:var(--n0);
 <header>
   <img class="wordmark" id="logo" src="/logo/a2data-white.svg" alt="">
   <div class="head-right">
-    <div class="orgs" id="orgs"></div>
     <form method="post" action="/logout"><button class="exit" type="submit">Выйти</button></form>
   </div>
 </header>
@@ -240,7 +244,10 @@ footer{padding:14px 28px;border-top:1px solid var(--n200);background:var(--n0);
 <div class="layout">
   <form id="form">
     <div class="panel">
-      <h2>Источник</h2>
+      <div class="panel-head">
+        <h2>Источник</h2>
+        <div class="orgs" id="orgs"></div>
+      </div>
       <div class="tabs">
         <button type="button" class="on" data-pane="pane-file">
           <svg viewBox="0 0 24 24"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/></svg>
@@ -405,7 +412,9 @@ function selectOrg(key) {
 fetch('/brands').then(r => r.json()).then(data => {
   ORGS = data.brands || [];
   $('orgs').innerHTML = ORGS.map(b =>
-    `<button type="button" data-org="${b.key}">${b.name}</button>`).join('');
+    `<button type="button" data-org="${b.key}" title="Оформление ${b.name}">
+       <span class="dot" style="background:${b.colors.brand}"></span>${b.name}</button>`
+  ).join('');
   document.querySelectorAll('.orgs button').forEach(b =>
     b.addEventListener('click', () => selectOrg(b.dataset.org)));
   selectOrg(ORGS.some(b => b.key === org) ? org : (data.default || 'a2data'));

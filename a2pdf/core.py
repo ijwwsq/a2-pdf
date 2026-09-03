@@ -113,8 +113,10 @@ def ensure_assets(quiet: bool = False) -> None:
                 continue
             seen.add(m.group(1))
             data = base64.b64encode(_get(m.group(1))).decode("ascii")
+            # заменяем только сам url(...): format(...) в правиле уже есть,
+            # второй такой же делает src невалидным и шрифт молча подменяется
             block = block.replace(
-                m.group(0), f"url(data:font/woff2;base64,{data}) format('woff2')")
+                m.group(0), 'url("data:font/woff2;base64,' + data + '")')
             # один вариативный файл на все веса — объявляем диапазон
             faces.append(re.sub(r"font-weight:\s*\d+;", "font-weight: 100 900;", block))
         css.write_text("\n".join(faces), encoding="utf-8")
@@ -628,10 +630,19 @@ def print_pdf(html_path: pathlib.Path, pdf_path: pathlib.Path, chrome: str,
         shutil.rmtree(profile, ignore_errors=True)
 
 
+def _rgb(color: str) -> tuple[float, float, float]:
+    color = color.lstrip("#")
+    return tuple(int(color[i:i + 2], 16) / 255 for i in (0, 2, 4))
+
+
 def stamp(doc: pymupdf.Document, header_right: str, footer_left: str,
-          skip_first: bool) -> None:
+          skip_first: bool, brand: brands.Brand | None = None) -> None:
+    """Рисует колонтитулы: логотип бренда, название и номера страниц."""
+    brand = brand or brands.get(None)
     reg = pymupdf.Font(fontfile=str(ASSETS / "Inter-Regular.ttf"))
     bold = pymupdf.Font(fontfile=str(ASSETS / "Inter-ExtraBold.ttf"))
+    main = _rgb(brand.color("brand"))
+    accent = _rgb(brand.color("accent"))
     total = doc.page_count
     for idx, page in enumerate(doc, start=1):
         if skip_first and idx == 1:
@@ -641,15 +652,13 @@ def stamp(doc: pymupdf.Document, header_right: str, footer_left: str,
         top_y, bot_y = 13 * MM, h - 11.5 * MM
 
         navy_tw, blue_tw, gray_tw = (pymupdf.TextWriter(page.rect) for _ in range(3))
-        logo = LOGO_DIR / "logo-color.png"
+        logo = LOGO_DIR / f"{brand.logo}-color.png"
         if logo.is_file():
             page.insert_image(pymupdf.Rect(left, top_y - 6.6, left + 26.5,
                                            top_y + 1.4),
                               filename=str(logo), keep_proportion=True)
         else:
-            navy_tw.append((left, top_y), "A2", font=bold, fontsize=8)
-            blue_tw.append((left + bold.text_length("A2", 8), top_y), "DATA",
-                           font=bold, fontsize=8)
+            navy_tw.append((left, top_y), brand.name, font=bold, fontsize=8)
         if header_right:
             gray_tw.append((right - reg.text_length(header_right, 7.5), top_y),
                            header_right, font=reg, fontsize=7.5)
@@ -663,8 +672,8 @@ def stamp(doc: pymupdf.Document, header_right: str, footer_left: str,
                        pymupdf.Point(right, 15.5 * MM), color=LINE, width=0.5)
         page.draw_line(pymupdf.Point(left, h - 15.5 * MM),
                        pymupdf.Point(right, h - 15.5 * MM), color=LINE, width=0.5)
-        navy_tw.write_text(page, color=NAVY)
-        blue_tw.write_text(page, color=BLUE)
+        navy_tw.write_text(page, color=main)
+        blue_tw.write_text(page, color=accent)
         gray_tw.write_text(page, color=GRAY)
 
 
@@ -792,9 +801,10 @@ def render_pdf(blocks: list[tuple], front: dict, out_path: pathlib.Path,
     doc.insert_pdf(pymupdf.open(body_pdf))
 
     stamp(doc, str(front.get("header", front["title"])),
-          str(front.get("footer", "")), skip_first=with_cover)
-    doc.set_metadata({"title": str(front["title"]), "author": COMPANY,
-                      "subject": str(front.get("subtitle", "")), "creator": COMPANY})
+          str(front.get("footer", "")), skip_first=with_cover, brand=brand)
+    doc.set_metadata({"title": str(front["title"]), "author": brand.name,
+                      "subject": str(front.get("subtitle", "")),
+                      "creator": brand.name})
     out_path.parent.mkdir(parents=True, exist_ok=True)
     result = save(doc, out_path)
     doc.close()
