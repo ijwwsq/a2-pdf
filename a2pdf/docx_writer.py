@@ -411,6 +411,135 @@ def _runners(document: Document, theme: "Theme", front: dict) -> None:
     _field(right, theme, "NUMPAGES", color=theme.light)
 
 
+class _Body:
+    """Набор содержимого: куда пишем, чем оформляем и что уже израсходовали."""
+
+    def __init__(self, document: Document, theme: "Theme", numbered: bool,
+                 diagrams: list[tuple[bytes, float]], width: int) -> None:
+        self.doc = document
+        self.theme = theme
+        self.numbered = numbered
+        self.diagrams = diagrams
+        self.width = width
+        self.section_no = 0
+        self.diagram_no = 0
+
+    def add(self, block: tuple) -> None:
+        handler = getattr(self, "_" + block[0], None)
+        if handler:
+            handler(block)
+
+    def _h1(self, block: tuple) -> None:
+        """Заголовок документа уже стоит на обложке."""
+
+    def _h2(self, block: tuple) -> None:
+        self.section_no += 1
+        paragraph = self.doc.add_paragraph(style="Heading 1")
+        _borders(paragraph, top=(self.theme.hex_line, 4))
+        if self.numbered:
+            number = paragraph.add_run(f"{self.section_no:02d}   ")
+            _style_run(number, 10, self.theme.accent_dark, self.theme.mono)
+        _runs(paragraph, self.theme, block[1], size=16, color=self.theme.main,
+              bold=True, font=self.theme.display)
+
+    def _h3(self, block: tuple) -> None:
+        paragraph = self.doc.add_paragraph(style="Heading 3")
+        _runs(paragraph, self.theme, block[1], size=11, color=self.theme.ink,
+              bold=True, font=self.theme.display)
+
+    _h4 = _h3
+
+    def _p(self, block: tuple) -> None:
+        _runs(self.doc.add_paragraph(), self.theme, block[1])
+
+    def _ul(self, block: tuple, style: str = "List Bullet") -> None:
+        for item in block[1]:
+            _runs(self.doc.add_paragraph(style=style), self.theme, item)
+
+    def _ol(self, block: tuple) -> None:
+        self._ul(block, style="List Number")
+
+    def _code(self, block: tuple) -> None:
+        for line in str(block[2]).split("\n"):
+            paragraph = self.doc.add_paragraph()
+            _spacing(paragraph, after=0, line=1.15)
+            paragraph.paragraph_format.left_indent = Cm(0.5)
+            _shade(paragraph._p.get_or_add_pPr(), self.theme.hex_soft)
+            _borders(paragraph, left=(self.theme.hex_accent, 18))
+            run = paragraph.add_run(line or " ")
+            _style_run(run, 8.5, self.theme.ink, self.theme.mono)
+        self.doc.add_paragraph()
+
+    def _note(self, block: tuple) -> None:
+        paragraph = self.doc.add_paragraph()
+        _spacing(paragraph, before=4, after=8, line=1.25)
+        paragraph.paragraph_format.left_indent = Cm(0.5)
+        _shade(paragraph._p.get_or_add_pPr(), self.theme.hex_mark_bg)
+        _borders(paragraph, left=(self.theme.hex_mark, 18))
+        _runs(paragraph, self.theme, block[1], size=10)
+
+    def _cap(self, block: tuple) -> None:
+        paragraph = self.doc.add_paragraph()
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _spacing(paragraph, before=2, after=10)
+        run = paragraph.add_run(_plain(block[1]))
+        run.italic = True
+        _style_run(run, 8.5, self.theme.gray, self.theme.font)
+
+    def _hr(self, block: tuple) -> None:
+        paragraph = self.doc.add_paragraph()
+        _spacing(paragraph, before=6, after=6)
+        _borders(paragraph, bottom=(self.theme.hex_line, 6))
+
+    def _table(self, block: tuple) -> None:
+        head, rows = block[1], block[2]
+        table = self.doc.add_table(rows=1, cols=len(head))
+        table.alignment = WD_TABLE_ALIGNMENT.CENTER
+        _repeat_header(table.rows[0])
+        for cell, title in zip(table.rows[0].cells, head):
+            _shade(cell._tc.get_or_add_tcPr(), self.theme.hex_main)
+            _cell_borders(cell, color=self.theme.hex_main, sides=())
+            cell.paragraphs[0].text = ""
+            _spacing(cell.paragraphs[0], before=3, after=3)
+            run = cell.paragraphs[0].add_run(_plain(title))
+            run.bold = True
+            _style_run(run, 9, WHITE, self.theme.font)
+        for row in rows:
+            cells = table.add_row().cells
+            for cell, value in zip(cells, row):
+                _cell_borders(cell, color=self.theme.hex_line, sides=("bottom",))
+                cell.paragraphs[0].text = ""
+                _spacing(cell.paragraphs[0], before=3, after=3, line=1.2)
+                _runs(cell.paragraphs[0], self.theme, str(value), size=9.5)
+        self.doc.add_paragraph()
+
+    def _mermaid(self, block: tuple) -> None:
+        if self.diagram_no >= len(self.diagrams):
+            return
+        blob, ratio = self.diagrams[self.diagram_no]
+        self.diagram_no += 1
+        width = self.width
+        tallest = Cm(17)          # схема не должна занимать весь лист
+        if width * ratio > tallest:
+            width = Emu(int(tallest / ratio))
+        paragraph = self.doc.add_paragraph()
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _spacing(paragraph, before=6, after=4)
+        paragraph.add_run().add_picture(io.BytesIO(blob), width=width)
+
+    def _image(self, block: tuple) -> None:
+        data = _load_image(block[1])
+        if not data:
+            return
+        paragraph = self.doc.add_paragraph()
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _spacing(paragraph, before=6, after=6)
+        try:
+            paragraph.add_run().add_picture(io.BytesIO(data), width=self.width)
+        except Exception:      # картинка неизвестного формата — пропускаем
+            pass
+
+
 def write_docx(blocks: list[tuple], front: dict, out_path: pathlib.Path,
                chrome: str | None = None, name: str = "document") -> pathlib.Path:
     """Собирает .docx и возвращает путь к файлу."""
@@ -426,8 +555,7 @@ def write_docx(blocks: list[tuple], front: dict, out_path: pathlib.Path,
     document = Document()
     _setup_styles(document, theme)
 
-    with_cover = str(front.get("cover", "true")).lower() not in ("false", "0", "no")
-    if with_cover:
+    if str(front.get("cover", "true")).lower() not in ("false", "0", "no"):
         _cover(document, theme, front)
         document.add_section(WD_SECTION.NEW_PAGE)
 
@@ -437,110 +565,14 @@ def write_docx(blocks: list[tuple], front: dict, out_path: pathlib.Path,
     section.left_margin = section.right_margin = Cm(2.2)
     _runners(document, theme, front)
 
-    diagrams = _diagram_images([b[1] for b in blocks if b[0] == "mermaid"],
-                               theme, chrome, name, front.get("scheme"))
-    diagram_no = 0
-    numbered = str(front.get("numbered", "true")).lower() not in ("false", "0", "no")
-    section_no = 0
-    content_width = section.page_width - section.left_margin - section.right_margin
-
+    body = _Body(
+        document, theme,
+        numbered=str(front.get("numbered", "true")).lower() not in ("false", "0", "no"),
+        diagrams=_diagram_images([b[1] for b in blocks if b[0] == "mermaid"],
+                                 theme, chrome, name, front.get("scheme")),
+        width=section.page_width - section.left_margin - section.right_margin)
     for block in blocks:
-        kind = block[0]
-
-        if kind == "h1":
-            continue
-
-        if kind == "h2":
-            section_no += 1
-            paragraph = document.add_paragraph(style="Heading 1")
-            _borders(paragraph, top=(theme.hex_line, 4))
-            if numbered:
-                number = paragraph.add_run(f"{section_no:02d}   ")
-                _style_run(number, 10, theme.accent_dark, theme.mono)
-            _runs(paragraph, theme, block[1], size=16, color=theme.main,
-                  bold=True, font=theme.display)
-        elif kind in ("h3", "h4"):
-            paragraph = document.add_paragraph(style="Heading 3")
-            _runs(paragraph, theme, block[1], size=11, color=theme.ink,
-                  bold=True, font=theme.display)
-        elif kind == "p":
-            _runs(document.add_paragraph(), theme, block[1])
-        elif kind in ("ul", "ol"):
-            style = "List Bullet" if kind == "ul" else "List Number"
-            for item in block[1]:
-                _runs(document.add_paragraph(style=style), theme, item)
-        elif kind == "code":
-            for line in str(block[2]).split("\n"):
-                paragraph = document.add_paragraph()
-                _spacing(paragraph, after=0, line=1.15)
-                paragraph.paragraph_format.left_indent = Cm(0.5)
-                _shade(paragraph._p.get_or_add_pPr(), theme.hex_soft)
-                _borders(paragraph, left=(theme.hex_accent, 18))
-                run = paragraph.add_run(line or " ")
-                _style_run(run, 8.5, theme.ink, theme.mono)
-            document.add_paragraph()
-        elif kind == "note":
-            paragraph = document.add_paragraph()
-            _spacing(paragraph, before=4, after=8, line=1.25)
-            paragraph.paragraph_format.left_indent = Cm(0.5)
-            _shade(paragraph._p.get_or_add_pPr(), theme.hex_mark_bg)
-            _borders(paragraph, left=(theme.hex_mark, 18))
-            _runs(paragraph, theme, block[1], size=10)
-        elif kind == "cap":
-            paragraph = document.add_paragraph()
-            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            _spacing(paragraph, before=2, after=10)
-            run = paragraph.add_run(_plain(block[1]))
-            run.italic = True
-            _style_run(run, 8.5, theme.gray, theme.font)
-        elif kind == "hr":
-            paragraph = document.add_paragraph()
-            _spacing(paragraph, before=6, after=6)
-            _borders(paragraph, bottom=(theme.hex_line, 6))
-        elif kind == "table":
-            head, rows = block[1], block[2]
-            table = document.add_table(rows=1, cols=len(head))
-            table.alignment = WD_TABLE_ALIGNMENT.CENTER
-            _repeat_header(table.rows[0])
-            for cell, title in zip(table.rows[0].cells, head):
-                _shade(cell._tc.get_or_add_tcPr(), theme.hex_main)
-                _cell_borders(cell, color=theme.hex_main, sides=())
-                cell.paragraphs[0].text = ""
-                _spacing(cell.paragraphs[0], before=3, after=3)
-                run = cell.paragraphs[0].add_run(_plain(title))
-                run.bold = True
-                _style_run(run, 9, WHITE, theme.font)
-            for row in rows:
-                cells = table.add_row().cells
-                for cell, value in zip(cells, row):
-                    _cell_borders(cell, color=theme.hex_line, sides=("bottom",))
-                    cell.paragraphs[0].text = ""
-                    _spacing(cell.paragraphs[0], before=3, after=3, line=1.2)
-                    _runs(cell.paragraphs[0], theme, str(value), size=9.5)
-            document.add_paragraph()
-        elif kind == "mermaid":
-            if diagram_no < len(diagrams):
-                blob, ratio = diagrams[diagram_no]
-                width = content_width
-                tallest = Cm(17)          # схема не должна занимать весь лист
-                if width * ratio > tallest:
-                    width = Emu(int(tallest / ratio))
-                paragraph = document.add_paragraph()
-                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                _spacing(paragraph, before=6, after=4)
-                paragraph.add_run().add_picture(io.BytesIO(blob), width=width)
-                diagram_no += 1
-        elif kind == "image":
-            data = _load_image(block[1])
-            if data:
-                paragraph = document.add_paragraph()
-                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                _spacing(paragraph, before=6, after=6)
-                try:
-                    paragraph.add_run().add_picture(io.BytesIO(data),
-                                                    width=content_width)
-                except Exception:
-                    pass
+        body.add(block)
 
     document.core_properties.title = _plain(front["title"])
     document.core_properties.author = theme.brand.name

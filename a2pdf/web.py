@@ -386,6 +386,85 @@ def _convert(source: dict, overrides: dict, chrome: str,
     return out_path, stem
 
 
+def _format_of(requested: str | None) -> str:
+    """Название формата из формы приводим к одному из трёх наших."""
+    value = (requested or "").lower()
+    if value in ("docx", "word"):
+        return "docx"
+    if value in ("png", "image"):
+        return "png"
+    return "pdf"
+
+
+async def _read_source(file: UploadFile | None, text: str | None,
+                       url: str | None) -> dict:
+    """Файл, текст или ссылка — приводим к общему виду и проверяем пределы."""
+    if file is not None and file.filename:
+        suffix = pathlib.Path(file.filename).suffix.lower()
+        if suffix not in ALLOWED:
+            raise HTTPException(415, f"Поддерживаются {', '.join(sorted(ALLOWED))}")
+        data = await file.read()
+        if not data:
+            raise HTTPException(400, "Пустой файл")
+        if len(data) > MAX_BYTES:
+            raise HTTPException(413, f"Файл больше {MAX_BYTES // 1024 // 1024} МБ")
+        return {"kind": "file", "data": data, "suffix": suffix,
+                "stem": _safe_stem(file.filename)}
+
+    if text and text.strip():
+        body = _text(text)
+        if len(body.encode()) > MAX_BYTES:
+            raise HTTPException(413, "Слишком много текста")
+        return {"kind": "text", "text": body, "stem": "document"}
+
+    if url and url.strip():
+        try:
+            return {"kind": "url", "url": _check_url(_text(url).strip())}
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+
+    raise HTTPException(400, "Нужен файл, текст или ссылка")
+
+
+def _look(fields: dict, style: str | None, brand: str | None, font: str | None,
+          scheme: str | None, background: str | None, cover: str | None,
+          numbered: str | None) -> dict:
+    """Настройки оформления. Всё незнакомое отбрасываем: подпись обложки
+    приходит от пользователя, а название бренда или схемы — нет."""
+    overrides = _overrides(**fields)
+    if style in ("light", "dark"):
+        overrides["style"] = style
+    overrides["brand"] = brands.get(brand).key
+    if font and font in brands.FONT_SETS:
+        overrides["font"] = font
+    if scheme and scheme in core.DIAGRAM_SCHEMES:
+        overrides["scheme"] = scheme
+    if cover in ("0", "false", "off"):
+        overrides["cover"] = "false"
+    if numbered in ("0", "false", "off"):
+        overrides["numbered"] = "false"
+    if background:
+        builtin = COVERS / f"{pathlib.Path(background).stem}.jpg"
+        if builtin.is_file():
+            overrides["photo"] = str(builtin)
+    return overrides
+
+
+async def _save_photo(photo: UploadFile | None) -> pathlib.Path | None:
+    """Своё фото обложки кладём во временный файл — его читает сборка."""
+    if photo is None or not photo.filename:
+        return None
+    suffix = pathlib.Path(photo.filename).suffix.lower()
+    if suffix not in PHOTO_TYPES:
+        raise HTTPException(415, "Фото должно быть jpg, png или webp")
+    blob = await photo.read()
+    if len(blob) > MAX_BYTES:
+        raise HTTPException(413, "Фото слишком большое")
+    path = OUT_DIR / f"{uuid.uuid4().hex}{suffix}"
+    path.write_bytes(blob)
+    return path
+
+
 @app.post("/convert")
 async def convert(
     request: Request,
@@ -411,67 +490,19 @@ async def convert(
     cover: str | None = Form(None),
     numbered: str | None = Form(None),
 ):
-    requested = (format or "").lower()
-    fmt = ("docx" if requested in ("docx", "word")
-           else "png" if requested in ("png", "image") else "pdf")
-    client = _client(request)
-    if not _rate_ok(client):
+    fmt = _format_of(format)
+    if not _rate_ok(_client(request)):
         raise HTTPException(429, "Слишком много запросов, попробуйте через минуту")
 
-    source: dict
-    if file is not None and file.filename:
-        suffix = pathlib.Path(file.filename).suffix.lower()
-        if suffix not in ALLOWED:
-            raise HTTPException(415, f"Поддерживаются {', '.join(sorted(ALLOWED))}")
-        data = await file.read()
-        if not data:
-            raise HTTPException(400, "Пустой файл")
-        if len(data) > MAX_BYTES:
-            raise HTTPException(413, f"Файл больше {MAX_BYTES // 1024 // 1024} МБ")
-        source = {"kind": "file", "data": data, "suffix": suffix,
-                  "stem": _safe_stem(file.filename)}
-    elif text and text.strip():
-        body = _text(text)
-        if len(body.encode()) > MAX_BYTES:
-            raise HTTPException(413, "Слишком много текста")
-        source = {"kind": "text", "text": body, "stem": "document"}
-    elif url and url.strip():
-        try:
-            source = {"kind": "url", "url": _check_url(_text(url).strip())}
-        except ValueError as exc:
-            raise HTTPException(400, str(exc))
-    else:
-        raise HTTPException(400, "Нужен файл, текст или ссылка")
+    source = await _read_source(file, text, url)
+    overrides = _look(
+        {"title": title, "subtitle": subtitle, "kicker": kicker, "index": index,
+         "header": header, "footer": footer, "confidential": confidential,
+         "meta": meta},
+        style, brand, font, scheme, background, cover, numbered)
 
-    overrides = _overrides(title=title, subtitle=subtitle, kicker=kicker,
-                           index=index, header=header, footer=footer,
-                           confidential=confidential, meta=meta)
-    if style in ("light", "dark"):
-        overrides["style"] = style
-    overrides["brand"] = brands.get(brand).key
-    if font and font in brands.FONT_SETS:
-        overrides["font"] = font
-    if scheme and scheme in core.DIAGRAM_SCHEMES:
-        overrides["scheme"] = scheme
-    if cover in ("0", "false", "off"):
-        overrides["cover"] = "false"
-    if numbered in ("0", "false", "off"):
-        overrides["numbered"] = "false"
-
-    if background:
-        builtin = COVERS / f"{pathlib.Path(background).stem}.jpg"
-        if builtin.is_file():
-            overrides["photo"] = str(builtin)
-
-    photo_path: pathlib.Path | None = None
-    if photo is not None and photo.filename:
-        if pathlib.Path(photo.filename).suffix.lower() not in PHOTO_TYPES:
-            raise HTTPException(415, "Фото должно быть jpg, png или webp")
-        blob = await photo.read()
-        if len(blob) > MAX_BYTES:
-            raise HTTPException(413, "Фото слишком большое")
-        photo_path = OUT_DIR / f"{uuid.uuid4().hex}{pathlib.Path(photo.filename).suffix.lower()}"
-        photo_path.write_bytes(blob)
+    photo_path = await _save_photo(photo)
+    if photo_path:
         overrides["photo"] = str(photo_path)
 
     started = time.monotonic()
