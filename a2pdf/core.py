@@ -194,6 +194,97 @@ def inline(text: str) -> str:
     return text
 
 
+MARKS = {"cap": re.compile(r"<!--CAP:(.+?)-->"),
+         "numbering": re.compile(r"<!--NUMBERING:(on|off)-->"),
+         "part": re.compile(r"<!--PART:([^|]+)\|([^-]+)-->")}
+HEADING = re.compile(r"^(#{1,4})\s+(.*)$")
+RULE = re.compile(r"^(-{3,}|\*{3,}|_{3,})$")
+BULLET = re.compile(r"^[-*+] ")
+NUMBER = re.compile(r"^\d+[.)] ")
+IMAGE = re.compile(r"^!\[[^\]]*\]\(([^)\s]+)\)$")
+SEPARATOR = re.compile(r":?-{2,}:?")
+BREAKS = re.compile(r"^(#{1,4} |```|\||[-*+] |\d+[.)] |> |<!--|-{3,}$)")
+
+
+def _read_fence(lines: list[str], i: int, keep_mermaid: bool
+                ) -> tuple[list[tuple], int]:
+    """Блок в тройных кавычках: код или диаграмма."""
+    lang = lines[i].strip()[3:].strip()
+    i += 1
+    buf = []
+    while i < len(lines) and not lines[i].strip().startswith("```"):
+        buf.append(lines[i])
+        i += 1
+    body = "\n".join(buf)
+    if lang == "mermaid":
+        return ([("mermaid", body)] if keep_mermaid else []), i + 1
+    return [("code", lang, body)], i + 1
+
+
+def _read_quote(lines: list[str], i: int) -> tuple[list[tuple], int]:
+    buf = []
+    while i < len(lines) and lines[i].strip().startswith(">"):
+        buf.append(lines[i].strip().lstrip(">").strip())
+        i += 1
+    return [("note", " ".join(buf))], i
+
+
+def _read_table(lines: list[str], i: int) -> tuple[list[tuple], int]:
+    rows = []
+    while i < len(lines) and lines[i].strip().startswith("|"):
+        rows.append([c.strip() for c in lines[i].strip().strip("|").split("|")])
+        i += 1
+    # строка-разделитель под шапкой к содержимому не относится
+    body = [r for r in rows[1:]
+            if not all(SEPARATOR.fullmatch(c or "-") for c in r)]
+    return [("table", rows[0], body)], i
+
+
+def _read_list(lines: list[str], i: int) -> tuple[list[tuple], int]:
+    ordered = bool(NUMBER.match(lines[i].strip()))
+    marker = NUMBER if ordered else BULLET
+    items: list[str] = []
+    while i < len(lines):
+        current, stripped = lines[i], lines[i].strip()
+        if not stripped:
+            following = lines[i + 1].strip() if i + 1 < len(lines) else ""
+            if marker.match(following):   # тот же список после пустой строки
+                i += 1
+                continue
+            break
+        if marker.match(stripped):
+            items.append(re.sub(r"^([-*+]|\d+[.)])\s+", "", stripped))
+        elif current.startswith(("  ", "\t")) and items:
+            items[-1] += " " + stripped   # продолжение предыдущего пункта
+        else:
+            break
+        i += 1
+    return [("ol" if ordered else "ul", items)], i
+
+
+def _read_paragraph(lines: list[str], i: int) -> tuple[list[tuple], int]:
+    buf = [lines[i].strip()]
+    i += 1
+    while i < len(lines) and lines[i].strip() and not BREAKS.match(lines[i].strip()):
+        buf.append(lines[i].strip())
+        i += 1
+    return [("p", " ".join(buf))], i
+
+
+def _read_mark(stripped: str) -> tuple | None:
+    """Служебные пометки в комментариях: подпись, нумерация, разделитель частей."""
+    found = MARKS["cap"].match(stripped)
+    if found:
+        return ("cap", found.group(1).strip())
+    found = MARKS["numbering"].match(stripped)
+    if found:
+        return ("numbering", found.group(1) == "on")
+    found = MARKS["part"].match(stripped)
+    if found:
+        return ("part", found.group(1).strip(), found.group(2).strip())
+    return None
+
+
 def parse(md: str, keep_mermaid: bool = True) -> list[tuple]:
     """Markdown → список блоков. Поддерживается нужное подмножество разметки."""
     lines = md.split("\n")
@@ -201,109 +292,34 @@ def parse(md: str, keep_mermaid: bool = True) -> list[tuple]:
     i = 0
     while i < len(lines):
         stripped = lines[i].strip()
-
         if not stripped:
             i += 1
             continue
 
-        m = re.match(r"<!--CAP:(.+?)-->", stripped)
-        if m:
-            blocks.append(("cap", m.group(1).strip()))
-            i += 1
-            continue
-
-        m = re.match(r"<!--NUMBERING:(on|off)-->", stripped)
-        if m:
-            blocks.append(("numbering", m.group(1) == "on"))
-            i += 1
-            continue
-
-        m = re.match(r"<!--PART:([^|]+)\|([^-]+)-->", stripped)
-        if m:
-            blocks.append(("part", m.group(1).strip(), m.group(2).strip()))
+        mark = _read_mark(stripped)
+        if mark:
+            blocks.append(mark)
             i += 1
             continue
 
         if stripped.startswith("```"):
-            lang = stripped[3:].strip()
-            i += 1
-            buf = []
-            while i < len(lines) and not lines[i].strip().startswith("```"):
-                buf.append(lines[i])
-                i += 1
-            i += 1
-            if lang == "mermaid":
-                if keep_mermaid:
-                    blocks.append(("mermaid", "\n".join(buf)))
-            else:
-                blocks.append(("code", lang, "\n".join(buf)))
-            continue
-
-        if stripped.startswith("> "):
-            buf = []
-            while i < len(lines) and lines[i].strip().startswith(">"):
-                buf.append(lines[i].strip().lstrip(">").strip())
-                i += 1
-            blocks.append(("note", " ".join(buf)))
-            continue
-
-        m = re.match(r"^!\[[^\]]*\]\(([^)\s]+)\)$", stripped)
-        if m:
-            blocks.append(("image", m.group(1)))
-            i += 1
-            continue
-
-        head = re.match(r"^(#{1,4})\s+(.*)$", stripped)
-        if head:
-            blocks.append((f"h{len(head.group(1))}", head.group(2)))
-            i += 1
-            continue
-
-        if re.match(r"^(-{3,}|\*{3,}|_{3,})$", stripped):
-            blocks.append(("hr",))
-            i += 1
-            continue
-
-        if stripped.startswith("|"):
-            rows = []
-            while i < len(lines) and lines[i].strip().startswith("|"):
-                rows.append([c.strip() for c in
-                             lines[i].strip().strip("|").split("|")])
-                i += 1
-            body = [r for r in rows[1:]
-                    if not all(re.fullmatch(r":?-{2,}:?", c or "-") for c in r)]
-            blocks.append(("table", rows[0], body))
-            continue
-
-        if re.match(r"^[-*+] ", stripped) or re.match(r"^\d+[.)] ", stripped):
-            ordered = bool(re.match(r"^\d+[.)] ", stripped))
-            marker = r"^\d+[.)] " if ordered else r"^[-*+] "
-            items: list[str] = []
-            while i < len(lines):
-                cur, s = lines[i], lines[i].strip()
-                if not s:
-                    nxt = lines[i + 1].strip() if i + 1 < len(lines) else ""
-                    if re.match(marker, nxt):  # тот же тип списка — продолжаем
-                        i += 1
-                        continue
-                    break
-                if re.match(marker, s):
-                    items.append(re.sub(r"^([-*+]|\d+[.)])\s+", "", s))
-                elif cur.startswith(("  ", "\t")) and items:
-                    items[-1] += " " + s
-                else:
-                    break
-                i += 1
-            blocks.append(("ol" if ordered else "ul", items))
-            continue
-
-        buf = [stripped]
-        i += 1
-        while i < len(lines) and lines[i].strip() and not re.match(
-                r"^(#{1,4} |```|\||[-*+] |\d+[.)] |> |<!--|-{3,}$)", lines[i].strip()):
-            buf.append(lines[i].strip())
-            i += 1
-        blocks.append(("p", " ".join(buf)))
+            found, i = _read_fence(lines, i, keep_mermaid)
+        elif stripped.startswith("> "):
+            found, i = _read_quote(lines, i)
+        elif stripped.startswith("|"):
+            found, i = _read_table(lines, i)
+        elif BULLET.match(stripped) or NUMBER.match(stripped):
+            found, i = _read_list(lines, i)
+        elif IMAGE.match(stripped):
+            found, i = [("image", IMAGE.match(stripped).group(1))], i + 1
+        elif HEADING.match(stripped):
+            head = HEADING.match(stripped)
+            found, i = [(f"h{len(head.group(1))}", head.group(2))], i + 1
+        elif RULE.match(stripped):
+            found, i = [("hr",)], i + 1
+        else:
+            found, i = _read_paragraph(lines, i)
+        blocks.extend(found)
     return blocks
 
 
