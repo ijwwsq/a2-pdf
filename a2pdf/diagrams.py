@@ -218,9 +218,16 @@ await document.fonts.ready;
 
 // Разбитая диаграмма не должна ронять сборку и рисовать чужую картинку
 // с ошибкой: показываем исходник кодом, автор увидит, что чинить.
-await mermaid.run({suppressErrors: true});
+// селектор указываем явно: с объектом опций mermaid не подставляет
+// свой умолчательный '.mermaid' и молча ничего не рисует
+await mermaid.run({querySelector: '.mermaid', suppressErrors: true});
 for (const pre of document.querySelectorAll('pre.mermaid')) {
-  if (pre.querySelector('svg')) continue;
+  const svg = pre.querySelector('svg');
+  // на разбитой схеме mermaid рисует собственную картинку с ошибкой —
+  // она в документе не нужна, узнаём её по служебной разметке
+  const failed = !svg || svg.querySelector('.error-icon, .error-text')
+    || svg.getAttribute('aria-roledescription') === 'error';
+  if (!failed) continue;
   const code = document.createElement('pre');
   code.className = 'code broken-diagram';
   code.textContent = pre.getAttribute('data-source') || pre.textContent;

@@ -48,6 +48,7 @@ import subprocess
 import sys
 import tempfile
 import urllib.request
+import uuid
 
 import pymupdf
 
@@ -787,7 +788,9 @@ def render_pdf(blocks: list[tuple], front: dict, out_path: pathlib.Path,
                        f"{mermaid_init(brand, fonts, doc_style)}"
                        "</script>")
 
-    stem = re.sub(r"[^\w.-]+", "_", name)[:50] + f"-{os.getpid()}-{id(blocks) & 0xffff:x}"
+    # имя должно быть уникальным на процесс и поток: соседняя сборка
+    # с тем же названием иначе перетрёт временные файлы
+    stem = re.sub(r"[^\w.-]+", "_", name)[:50] + f"-{uuid.uuid4().hex[:12]}"
     body_html = TMP / f"{stem}-body.html"
     body_html.write_text(BODY_TPL.format(
         title=html.escape(str(front["title"])), fonts=fonts_css,
@@ -873,7 +876,7 @@ def diagram_images(sources: list[str], front: dict, chrome: str | None = None,
     brand = brands.get(front.get("brand"))
     fonts = brands.fonts_for(brand, front.get("font"))
     TMP.mkdir(parents=True, exist_ok=True)
-    stem = re.sub(r"[^\w.-]+", "_", name)[:40] + f"-{os.getpid()}"
+    stem = re.sub(r"[^\w.-]+", "_", name)[:40] + f"-{uuid.uuid4().hex[:12]}"
     html_path = TMP / f"{stem}-dg.html"
     pdf_path = TMP / f"{stem}-dg.pdf"
     key = scheme if scheme is not None else front.get("scheme")

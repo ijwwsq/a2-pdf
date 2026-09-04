@@ -94,7 +94,7 @@ def test_mermaid_init_is_valid_json_theme():
     brand = brands.get("becloud")
     js = core.mermaid_init(brand, brand.fonts, core.scheme_style("dark", brand))
     assert "themeVariables:" in js
-    assert "mermaid.run({suppressErrors: true})" in js
+    assert "mermaid.run({querySelector: '.mermaid', suppressErrors: true})" in js
 
 
 def test_dark_scheme_marked_dark_and_clear_transparent():
