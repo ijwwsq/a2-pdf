@@ -104,3 +104,39 @@ def test_broken_docx_gives_clear_error():
     with pytest.raises(DocxError):
         docx_to_blocks("не документ".encode("utf-8"))
     assert issubclass(DocxError, ValueError)   # web превращает такое в 400
+
+
+@pytest.mark.parametrize("url, page", [
+    ("https://www.notion.so/Otchet-1234567890abcdef1234567890abcdef",
+     "12345678-90ab-cdef-1234-567890abcdef"),
+    ("https://team.notion.site/12345678-90ab-cdef-1234-567890abcdef",
+     "12345678-90ab-cdef-1234-567890abcdef")])
+def test_notion_page_id(url, page):
+    assert notion.page_id(url) == page
+
+
+def test_notion_page_id_requires_identifier():
+    with pytest.raises(notion.NotionError):
+        notion.page_id("https://www.notion.so/prosto-stranica")
+
+
+@pytest.mark.parametrize("markup", [
+    "", "   ", "<p>текст<div><span>ещё", "<table></table>",
+    "<ul><li>раз<ul><li>вложенный</li></ul></li></ul>",
+    "<!-- скрыто --><p>видно</p>", "<div>" * 200 + "текст" + "</div>" * 200])
+def test_html_reader_survives_broken_markup(markup):
+    assert isinstance(html_to_blocks(markup), list)
+
+
+def test_html_reader_decodes_entities():
+    blocks = html_to_blocks("<p>&laquo;кавычки&raquo; &amp; &#1090;&#1077;&#1082;&#1089;&#1090;</p>")
+    text = " ".join(str(b[1]) for b in blocks)
+    assert "«кавычки»" in text and "текст" in text and "&amp;" not in text
+
+
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-8-sig", "cp1251", "utf-16",
+                                      "utf-32"])
+def test_text_encodings_round_trip(encoding):
+    """Блокнот и Word сохраняют с меткой кодировки — по ней и определяем."""
+    text = "# Квартальный отчёт"
+    assert core.decode_text(text.encode(encoding)) == text

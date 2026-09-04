@@ -137,10 +137,21 @@ def ensure_assets(quiet: bool = False) -> None:
         mjs.write_bytes(_get(MERMAID_JS))
 
 
+BOMS = ((b"\xef\xbb\xbf", "utf-8-sig"),
+        (b"\xff\xfe\x00\x00", "utf-32-le"),
+        (b"\x00\x00\xfe\xff", "utf-32-be"),
+        (b"\xff\xfe", "utf-16-le"),
+        (b"\xfe\xff", "utf-16-be"))
+
+
 def decode_text(data: bytes) -> str:
-    """Текст файла в строку. Кроме UTF-8 пробуем cp1251: русские .md с Windows
-    часто приходят именно в ней, а «replace» превратил бы их в квадраты."""
-    for encoding in ("utf-8-sig", "cp1251"):
+    """Текст файла в строку. Кодировку берём по метке в начале файла,
+    иначе пробуем UTF-8 и cp1251: русские .md с Windows часто приходят
+    в ней, а «replace» превратил бы их в квадраты."""
+    for mark, encoding in BOMS:
+        if data.startswith(mark):
+            return data[len(mark):].decode(encoding, errors="replace")
+    for encoding in ("utf-8", "cp1251"):
         try:
             return data.decode(encoding)
         except UnicodeDecodeError:
