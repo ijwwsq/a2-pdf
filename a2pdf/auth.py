@@ -85,6 +85,13 @@ def is_local(host: str | None) -> bool:
         return host in ("localhost", "testclient")
 
 
+def _equal(left: str, right: str) -> bool:
+    """Сравнение за постоянное время. Сравниваем байты: compare_digest
+    отказывается работать со строками, где есть не-ASCII, а логин и кука
+    приходят от пользователя и содержать могут что угодно."""
+    return hmac.compare_digest(left.encode("utf-8"), right.encode("utf-8"))
+
+
 def _sign(config: Config, payload: str) -> str:
     digest = hmac.new(config.secret, payload.encode("utf-8"),
                       hashlib.sha256).digest()
@@ -108,7 +115,7 @@ def validate(config: Config, cookie: str | None) -> str | None:
     except ValueError:
         return None
     payload = f"{user}|{expires}"
-    if not hmac.compare_digest(signature, _sign(config, payload)):
+    if not _equal(signature, _sign(config, payload)):
         return None
     if not expires.isdigit() or int(expires) < time.time():
         return None
@@ -136,7 +143,7 @@ def check(config: Config, user: str, password: str) -> bool:
     нельзя было понять, существует ли пользователь."""
     stored = config.password_hash or hash_password(secrets.token_hex(16))
     correct_password = verify_password(password, stored)
-    correct_user = hmac.compare_digest(user.strip(), config.user)
+    correct_user = _equal(user.strip(), config.user)
     return bool(config.password_hash) and correct_user and correct_password
 
 

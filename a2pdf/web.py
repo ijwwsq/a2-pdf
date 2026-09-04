@@ -49,6 +49,7 @@ MIME = {"pdf": "application/pdf",
                 ".wordprocessingml.document",
         "png": "image/png"}
 COVERS = core.ASSETS / "covers"          # встроенные фоны обложки
+PNG_DPI = int(os.environ.get("A2PDF_PNG_DPI", 220))
 
 STATIC = pathlib.Path(__file__).resolve().parent / "static"
 AUTH = auth.Config()
@@ -57,6 +58,11 @@ OUT_DIR = pathlib.Path(os.environ.get("A2PDF_OUT") or tempfile.gettempdir()) / "
 
 @contextlib.asynccontextmanager
 async def lifespan(application: FastAPI):
+    # пул и счётчик мест создаём на запуск: закрытый пул не оживить,
+    # а приложение может подниматься в процессе не один раз
+    application.state.pool = concurrent.futures.ThreadPoolExecutor(
+        max_workers=WORKERS)
+    application.state.slots = asyncio.Semaphore(WORKERS)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     core.ensure_assets(quiet=True)
     application.state.chrome = core.find_chrome()
@@ -73,13 +79,11 @@ async def lifespan(application: FastAPI):
     for stale in OUT_DIR.glob("*"):  # мусор от прошлого запуска
         stale.unlink(missing_ok=True)
     yield
-    _pool.shutdown(wait=False, cancel_futures=True)
+    application.state.pool.shutdown(wait=False, cancel_futures=True)
 
 
 app = FastAPI(title="A2DATA PDF", version=__import__("a2pdf").__version__,
               docs_url="/api", redoc_url=None, lifespan=lifespan)
-_pool = concurrent.futures.ThreadPoolExecutor(max_workers=WORKERS)
-_slots = asyncio.Semaphore(WORKERS)
 _hits: dict[str, deque] = {}
 
 
@@ -309,7 +313,8 @@ def _text(value: str) -> str:
 def _safe_stem(name: str) -> str:
     stem = pathlib.Path(_text(name)).stem
     stem = re.sub(r"[^\w .()\[\]-]+", "_", stem, flags=re.UNICODE).strip()
-    return stem[:80] or "document"
+    stem = stem[:80].strip("_. ")
+    return stem or "document"
 
 
 def _overrides(**fields: str | None) -> dict:
@@ -326,76 +331,58 @@ def _overrides(**fields: str | None) -> dict:
     return out
 
 
-def _blocks_of(source: dict, overrides: dict) -> tuple[list[tuple], dict]:
-    """Блоки документа и настройки обложки для любого источника."""
+def _blocks_of(source: dict, overrides: dict) -> tuple[list[tuple], dict, str]:
+    """Блоки, настройки обложки и имя файла для любого источника."""
     kind = source["kind"]
-    if kind == "file" and source["suffix"] == ".docx":
-        blocks, front = docx_to_blocks(source["data"])
-        front.setdefault("title", source["stem"])
-    elif kind in ("file", "text"):
-        text = (source["data"].decode("utf-8-sig", errors="replace")
-                if kind == "file" else source["text"])
-        front, body = core.split_front_matter(text)
-        blocks = core.parse(body)
-    else:
-        url = source["url"]
-        blocks, front = (notion.load(url) if notion.is_notion(url)
-                         else fetch(url))
-    front.update(overrides)
-    return blocks, front
-
-
-def _convert_png(source: dict, overrides: dict,
-                 chrome: str) -> tuple[pathlib.Path, str]:
-    """Схему отдаём картинкой: берём первую диаграмму документа."""
-    blocks, front = _blocks_of(source, overrides)
-    sources = [b[1] for b in blocks if b[0] == "mermaid"]
-    if not sources:
-        raise ValueError("В тексте нет диаграммы mermaid")
-    images = core.diagram_images(sources[:1], front, chrome=chrome, dpi=220,
-                                 scheme=front.get("scheme"))
-    out_path = OUT_DIR / f"{uuid.uuid4().hex}.png"
-    out_path.write_bytes(images[0][0])
-    stem = _safe_stem(str(front.get("title") or source.get("stem") or "diagram"))
-    return out_path, stem
-
-
-def _convert(source: dict, overrides: dict, chrome: str,
-             fmt: str = "pdf") -> tuple[pathlib.Path, str]:
-    """Собирает документ и возвращает путь и предлагаемое имя файла."""
-    if fmt == "png":
-        return _convert_png(source, overrides, chrome)
-
-    out_path = OUT_DIR / f"{uuid.uuid4().hex}.{fmt}"
-    kind = source["kind"]
-
     if kind == "file" and source["suffix"] == ".docx":
         blocks, front = docx_to_blocks(source["data"])
         if not blocks:
             raise ValueError("В документе не нашлось текста")
         front.setdefault("title", source["stem"])
         front.update(overrides)
-        core.render_document(blocks, front, out_path, fmt=fmt, chrome=chrome,
-                             name=source["stem"])
-        return out_path, source["stem"]
+        return blocks, front, source["stem"]
 
     if kind in ("file", "text"):
-        text = (source["data"].decode("utf-8-sig", errors="replace")
+        text = (core.decode_text(source["data"])
                 if kind == "file" else source["text"])
         if not text.strip():
             raise ValueError("Пустой текст")
-        core.build_markdown(text, out_path, overrides=overrides, chrome=chrome,
-                            name=source["stem"], fmt=fmt)
-        return out_path, source["stem"]
+        blocks, front = core.markdown_blocks(text, overrides)
+        return blocks, front, source["stem"]
 
     url = source["url"]
-    if notion.is_notion(url):
-        blocks, front = notion.load(url)
-    else:
-        blocks, front = fetch(url)
+    blocks, front = notion.load(url) if notion.is_notion(url) else fetch(url)
     front.update(overrides)
-    stem = _safe_stem(str(front.get("title") or "document"))
-    core.render_document(blocks, front, out_path, fmt=fmt, chrome=chrome, name=stem)
+    return blocks, front, _safe_stem(str(front.get("title") or "document"))
+
+
+def _discard(job) -> None:
+    """Удаляет файл сборки, которую уже никто не ждёт."""
+    try:
+        out_path, _ = job.result()
+    except Exception:
+        return
+    pathlib.Path(out_path).unlink(missing_ok=True)
+
+
+def _convert(source: dict, overrides: dict, chrome: str,
+             fmt: str = "pdf") -> tuple[pathlib.Path, str]:
+    """Собирает документ и возвращает путь и предлагаемое имя файла."""
+    blocks, front, stem = _blocks_of(source, overrides)
+    out_path = OUT_DIR / f"{uuid.uuid4().hex}.{fmt}"
+
+    if fmt == "png":
+        sources = [b[1] for b in blocks if b[0] == "mermaid"]
+        if not sources:
+            raise ValueError("В тексте нет диаграммы mermaid")
+        image, _ = core.diagram_images(sources[:1], front, chrome=chrome,
+                                       dpi=PNG_DPI,
+                                       scheme=front.get("scheme"))[0]
+        out_path.write_bytes(image)
+        return out_path, _safe_stem(str(front.get("title") or stem))
+
+    core.render_document(blocks, front, out_path, fmt=fmt, chrome=chrome,
+                         name=stem)
     return out_path, stem
 
 
@@ -489,13 +476,16 @@ async def convert(
 
     started = time.monotonic()
     loop = asyncio.get_running_loop()
-    async with _slots:
+    async with app.state.slots:
+        job = loop.run_in_executor(app.state.pool, _convert, source, overrides,
+                                   app.state.chrome, fmt)
         try:
-            out_path, stem = await asyncio.wait_for(
-                loop.run_in_executor(_pool, _convert, source, overrides,
-                                     app.state.chrome, fmt),
-                timeout=TIMEOUT)
-        except asyncio.TimeoutError:
+            out_path, stem = await asyncio.wait_for(asyncio.shield(job),
+                                                    timeout=TIMEOUT)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            # поток в пуле не остановить, поэтому убираем за ним результат сами:
+            # иначе брошенные сборки копятся на диске
+            job.add_done_callback(_discard)
             raise HTTPException(504, "Сборка заняла слишком много времени")
         except (ValueError, FetchError, notion.NotionError) as exc:
             raise HTTPException(400, str(exc))
