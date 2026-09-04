@@ -236,11 +236,13 @@ def font_sets(user: str = Depends(current_user)) -> JSONResponse:
 
 
 @app.get("/schemes")
-def diagram_schemes(user: str = Depends(current_user)) -> JSONResponse:
-    """Шаблоны оформления для схем mermaid."""
+def diagram_schemes(brand: str | None = None,
+                    user: str = Depends(current_user)) -> JSONResponse:
+    """Шаблоны оформления для схем mermaid вместе с цветами для миниатюр."""
+    picked = brands.get(brand)
     return JSONResponse({"schemes": [
-        {"key": key, "title": preset["title"], "dark": preset["dark"],
-         "clear": preset["clear"]}
+        {"key": key, "title": preset["title"], "note": preset["note"],
+         "preview": core.scheme_style(key, picked)["preview"]}
         for key, preset in core.DIAGRAM_SCHEMES.items()]})
 
 

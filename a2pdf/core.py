@@ -40,6 +40,7 @@ import base64
 import mimetypes
 import os
 import html
+import json
 import pathlib
 import re
 import shutil
@@ -349,10 +350,10 @@ def render(blocks: list[tuple], brand: brands.Brand, numbered: bool = True,
         elif kind == "code":
             out.append(f'<pre class="code"><code>{html.escape(b[2])}</code></pre>')
         elif kind == "mermaid":
-            preset = diagram_scheme(scheme)
-            out.append(f'<div class="dg dg-mermaid sch-{scheme or "plain"}">'
+            style = scheme_style(scheme, brand)
+            out.append(f'<div class="dg dg-mermaid sch-{style["key"]}">'
                        '<pre class="mermaid">'
-                       f'{html.escape(theme_diagram(b[1], brand, preset["dark"]))}'
+                       f'{html.escape(theme_diagram(b[1], brand, style))}'
                        "</pre></div>")
         elif kind == "note":
             out.append(f'<div class="note"><p>{inline(b[1])}</p></div>')
@@ -504,7 +505,7 @@ tbody tr:nth-child(even) td{background:var(--n50)}
 .dg{border:.25mm solid var(--n200);border-radius:2mm;background:var(--n0);padding:6mm;
     margin:0 0 5mm;break-inside:avoid}
 .dg-mermaid{text-align:center;padding:4mm}
-.dg.sch-card{background:var(--brand-50)}
+.dg.sch-soft{background:var(--n50)}
 .dg.sch-dark{background:var(--brand-dark);border-color:var(--brand-dark)}
 .dg.sch-clear{background:none;border:0}
 .dg-mermaid svg{max-width:100%;max-height:198mm;width:auto;height:auto}
@@ -549,49 +550,151 @@ def tint(color: str, alpha: float) -> str:
 
 
 DIAGRAM_SCHEMES = {
-    "plain": {"title": "Чистая", "dark": False, "clear": False,
-              "css": "background:#FFFFFF"},
-    "card": {"title": "Карточка", "dark": False, "clear": False,
-             "css": "background:var(--brand-50);border:.3mm solid var(--n200);"
-                    "border-radius:3mm;padding:10mm"},
-    "dark": {"title": "Тёмная", "dark": True, "clear": False,
-             "css": "background:var(--brand-dark);border-radius:3mm;"
-                    "padding:10mm"},
-    "clear": {"title": "Прозрачная", "dark": False, "clear": True,
-              "css": "background:none"},
+    "outline": {"title": "Контур", "note": "белый фон, тонкая обводка",
+                "dark": False, "clear": False},
+    "soft": {"title": "Мягкая", "note": "пастельные плашки",
+             "dark": False, "clear": False},
+    "solid": {"title": "Плотная", "note": "заливка в цвет бренда",
+              "dark": False, "clear": False},
+    "dark": {"title": "Тёмная", "note": "для слайдов",
+             "dark": True, "clear": False},
+    "clear": {"title": "Прозрачная", "note": "PNG без фона",
+              "dark": False, "clear": True},
 }
+DEFAULT_SCHEME = "outline"
 
 
 def diagram_scheme(key: str | None) -> dict:
-    return DIAGRAM_SCHEMES.get(str(key or "plain"), DIAGRAM_SCHEMES["plain"])
+    """Описание пресета: заголовок и признаки тёмного и прозрачного фона."""
+    return DIAGRAM_SCHEMES.get(str(key or DEFAULT_SCHEME),
+                               DIAGRAM_SCHEMES[DEFAULT_SCHEME])
+
+
+def scheme_style(key: str | None, brand: brands.Brand) -> dict:
+    """Полное оформление пресета в цветах бренда.
+
+    palette   — заливка, обводка и текст для групп узлов из classDef
+    theme     — переменные темы mermaid для остальных узлов и линий
+    backdrop  — подложка под диаграммой
+    svg       — правка формы и теней уже отрисованного SVG
+    """
+    c, n = brand.colors, brand.neutrals
+    white, key = n["n0"], str(key or DEFAULT_SCHEME)
+    if key not in DIAGRAM_SCHEMES:
+        key = DEFAULT_SCHEME
+
+    if key == "soft":
+        palette = [(c["accent_50"], c["accent_50"], c["brand"]),
+                   (c["brand_100"], c["brand_100"], c["brand"]),
+                   (c["mark_50"], c["mark_50"], c["brand"]),
+                   (c["accent_100"], c["accent_100"], c["brand"]),
+                   (c["brand_50"], c["brand_50"], c["brand"])]
+        theme = {"mainBkg": c["accent_50"], "nodeBorder": c["accent_50"],
+                 "primaryColor": c["accent_50"],
+                 "primaryBorderColor": c["accent_50"],
+                 "primaryTextColor": c["brand"], "textColor": c["brand"],
+                 "lineColor": c["accent"], "edgeLabelBackground": n["n50"],
+                 "clusterBkg": white, "clusterBorder": c["brand_100"]}
+        backdrop = ("background:var(--n50);border-radius:4mm;padding:11mm")
+        svg = {"radius": "12px", "stroke": "0", "shadow":
+               f"drop-shadow(0 2px 5px {tint(c['brand'], .16)})",
+               "edge": "1.6px"}
+    elif key == "solid":
+        palette = [(c["brand"], c["brand"], white),
+                   (c["accent"], c["accent"], white),
+                   (c["mark"], c["mark"], white),
+                   (c["accent_dark"], c["accent_dark"], white),
+                   (c["brand_dark"], c["brand_dark"], white)]
+        theme = {"mainBkg": c["brand"], "nodeBorder": c["brand"],
+                 "primaryColor": c["brand"], "primaryBorderColor": c["brand"],
+                 "primaryTextColor": white, "textColor": n["n700"],
+                 "lineColor": n["n500"], "edgeLabelBackground": white,
+                 "clusterBkg": n["n50"], "clusterBorder": n["n200"]}
+        backdrop = "background:#FFFFFF"
+        svg = {"radius": "9px", "stroke": "0", "shadow":
+               f"drop-shadow(0 2px 4px {tint(c['brand'], .22)})",
+               "edge": "1.5px"}
+    elif key == "dark":
+        palette = [(tint(c["accent"], .26), c["accent"], white),
+                   (tint(white, .12), n["n200"], white),
+                   (tint(c["mark"], .26), c["mark"], white),
+                   (tint(c["accent"], .40), c["accent_50"], white),
+                   (tint(white, .20), white, white)]
+        theme = {"mainBkg": tint(c["accent"], .26), "nodeBorder": c["accent"],
+                 "primaryColor": tint(c["accent"], .26),
+                 "primaryBorderColor": c["accent"],
+                 "primaryTextColor": white, "textColor": white,
+                 "lineColor": tint(white, .62),
+                 "edgeLabelBackground": c["brand_dark"],
+                 "clusterBkg": tint(white, .07),
+                 "clusterBorder": tint(white, .28)}
+        backdrop = "background:var(--brand-dark);border-radius:4mm;padding:11mm"
+        svg = {"radius": "9px", "stroke": "1.2px", "shadow": "none",
+               "edge": "1.4px"}
+    else:  # outline и clear рисуются одинаково, различается только подложка
+        palette = [(white, c["accent"], c["brand"]),
+                   (white, c["brand"], c["brand"]),
+                   (white, c["mark"], c["brand"]),
+                   (white, c["accent_dark"], c["brand"]),
+                   (white, c["n400"] if "n400" in c else n["n400"], c["brand"])]
+        theme = {"mainBkg": white, "nodeBorder": c["brand"],
+                 "primaryColor": white, "primaryBorderColor": c["brand"],
+                 "primaryTextColor": c["brand"], "textColor": n["n700"],
+                 "lineColor": n["n400"],
+                 "edgeLabelBackground": white if key == "outline" else "#FFFFFF00",
+                 "clusterBkg": white, "clusterBorder": n["n200"]}
+        backdrop = ("background:none" if key == "clear"
+                    else "background:#FFFFFF")
+        svg = {"radius": "7px", "stroke": "1.5px", "shadow": "none",
+               "edge": "1.3px"}
+
+    fill, stroke, text = palette[0]
+    return {"key": key, "palette": palette, "theme": theme,
+            "backdrop": backdrop, "svg": svg,
+            # цвета для миниатюры пресета в форме
+            "preview": {"bg": "" if key == "clear" else
+                        c["brand_dark"] if key == "dark" else
+                        n["n50"] if key == "soft" else white,
+                        "fill": fill, "stroke": stroke, "text": text},
+            "clear": DIAGRAM_SCHEMES[key]["clear"],
+            "dark": DIAGRAM_SCHEMES[key]["dark"]}
+
+
+def scheme_css(style: dict) -> str:
+    """Форма узлов, тени и толщина линий — темой mermaid это не задаётся."""
+    svg = style["svg"]
+    theme = style["theme"]
+    # цвет подписи ребра тема mermaid не отдаёт, поэтому задаём его сами
+    rules = (".dg-mermaid .edgeLabel,.dg-mermaid .edgeLabel p,"
+             ".dg-mermaid .edgeLabel span,.dg-mermaid .edgeLabel div{"
+             f'color:{theme["textColor"]};'
+             f'background:{theme["edgeLabelBackground"]}}}'
+             ".dg-mermaid .node rect,.dg-mermaid .node .label-container{"
+             f'rx:{svg["radius"]};ry:{svg["radius"]}}}'
+             f'.dg-mermaid .node{{filter:{svg["shadow"]}}}'
+             ".dg-mermaid .edgePath path,.dg-mermaid .flowchart-link{"
+             f'stroke-width:{svg["edge"]}}}')
+    if svg["stroke"] == "0":
+        rules += (".dg-mermaid .node rect,.dg-mermaid .node polygon,"
+                  ".dg-mermaid .node path,.dg-mermaid .node circle,"
+                  ".dg-mermaid .node ellipse{stroke-width:0}")
+    else:
+        rules += (".dg-mermaid .node rect,.dg-mermaid .node polygon,"
+                  ".dg-mermaid .node path,.dg-mermaid .node circle,"
+                  ".dg-mermaid .node ellipse{"
+                  f'stroke-width:{svg["stroke"]}}}')
+    return rules
 
 
 DIAGRAM_STYLE = re.compile(r"^\s*(classDef|style)\s+(\S+)", re.MULTILINE)
 DIAGRAM_COLOR = re.compile(r"\b(fill|stroke|color)\s*:\s*#[0-9A-Fa-f]{3,8}")
 
 
-def diagram_palette(brand: brands.Brand,
-                    on_dark: bool = False) -> list[tuple[str, str, str]]:
-    """Заливка, обводка и текст для групп узлов — по паре на каждый класс."""
-    c = brand.colors
-    n = brand.neutrals
-    if on_dark:
-        return [(tint(c["accent"], .26), c["accent"], n["n0"]),
-                (tint(n["n0"], .12), n["n200"], n["n0"]),
-                (tint(c["mark"], .26), c["mark"], n["n0"]),
-                (tint(c["accent"], .40), c["accent_50"], n["n0"]),
-                (tint(n["n0"], .20), n["n0"], n["n0"])]
-    return [(c["accent_50"], c["accent"], c["brand"]),
-            (c["brand_50"], c["brand"], c["brand"]),
-            (c["mark_50"], c["mark"], c["brand"]),
-            (c["accent_100"], c["accent_dark"], c["brand"]),
-            (c["brand_100"], c["brand_dark"], c["brand"])]
-
-
-def theme_diagram(src: str, brand: brands.Brand, on_dark: bool = False) -> str:
+def theme_diagram(src: str, brand: brands.Brand,
+                  style: dict | None = None) -> str:
     """Свои цвета в classDef и style перекрывают тему mermaid, поэтому
-    подменяем их палитрой бренда: группы узлов остаются различимыми."""
-    palette = diagram_palette(brand, on_dark)
+    подменяем их палитрой пресета: группы узлов остаются различимыми."""
+    palette = (style or scheme_style(None, brand))["palette"]
     order: dict[str, int] = {}
     for _, name in DIAGRAM_STYLE.findall(src):
         order.setdefault(name, len(order))
@@ -611,46 +714,37 @@ def theme_diagram(src: str, brand: brands.Brand, on_dark: bool = False) -> str:
 
 
 def mermaid_init(brand: brands.Brand, fonts: brands.Fonts | None = None,
-                 on_dark: bool = False) -> str:
-    """Тема mermaid в цветах бренда и выбранных шрифтах."""
+                 style: dict | None = None) -> str:
+    """Тема mermaid в цветах пресета и выбранных шрифтах."""
     fonts = fonts or brand.fonts
-    colors = dict(brand.colors)
-    neutrals = dict(brand.neutrals)
-    white = brand.neutrals["n0"]
-    if on_dark:
-        # на тёмной подложке роли меняются местами: подложки узлов становятся
-        # полупрозрачными, а весь текст и линии — светлыми
-        colors |= {"accent_50": tint(colors["accent"], .26),
-                   "mark_50": tint(colors["mark"], .26),
-                   "brand": white, "accent": colors["accent_50"],
-                   "mark": colors["mark"]}
-        neutrals |= {"n50": tint(white, .10), "n200": tint(white, .30),
-                     "n400": tint(white, .50), "n500": tint(white, .62),
-                     "n700": white}
-    # прозрачность mermaid тут не берёт, поэтому подпись ребра красим
-    # в цвет самой подложки
-    edge_label_bg = brand.colors["brand_dark"] if on_dark else "#FFFFFF"
+    style = style or scheme_style(None, brand)
+    theme = {"fontFamily": f"{fonts.body}, 'Segoe UI', sans-serif",
+             "fontSize": "13px",
+             "secondaryColor": brand.colors["brand_50"],
+             "tertiaryColor": brand.colors["mark_50"],
+             "actorBkg": style["theme"]["mainBkg"],
+             "actorBorder": style["theme"]["nodeBorder"],
+             "actorTextColor": style["theme"]["primaryTextColor"],
+             "actorLineColor": style["theme"]["lineColor"],
+             "signalColor": style["theme"]["textColor"],
+             "signalTextColor": style["theme"]["textColor"],
+             "labelBoxBkgColor": style["theme"]["mainBkg"],
+             "labelBoxBorderColor": style["theme"]["nodeBorder"],
+             # подпись ребра лежит на подложке диаграммы, а не на узле,
+             # поэтому цвет берём от обычного текста
+             "labelTextColor": style["theme"]["textColor"],
+             "loopTextColor": style["theme"]["textColor"],
+             "noteBkgColor": brand.colors["mark_50"],
+             "noteBorderColor": brand.colors["mark"],
+             "noteTextColor": brand.colors["brand"],
+             "altBackground": brand.neutrals["n50"]}
+    theme |= style["theme"]
     return """
 mermaid.initialize({
   startOnLoad:false, theme:'base', securityLevel:'loose',
   flowchart:{curve:'basis',htmlLabels:true,useMaxWidth:true},
   sequence:{useMaxWidth:true,actorMargin:40,width:150},
-  themeVariables:{
-    fontFamily:"%(body)s, 'Segoe UI', sans-serif", fontSize:'13px',
-    primaryColor:'%(accent_50)s', primaryBorderColor:'%(accent)s',
-    primaryTextColor:'%(brand)s',
-    secondaryColor:'%(n50)s', tertiaryColor:'%(mark_50)s',
-    lineColor:'%(n500)s', textColor:'%(n700)s',
-    mainBkg:'%(accent_50)s', nodeBorder:'%(accent)s', clusterBkg:'%(n50)s',
-    clusterBorder:'%(n200)s', edgeLabelBackground:'%(edge_label_bg)s',
-    actorBkg:'%(brand)s', actorBorder:'%(brand)s', actorTextColor:'#FFFFFF',
-    actorLineColor:'%(n400)s', signalColor:'%(n700)s',
-    signalTextColor:'%(n700)s',
-    labelBoxBkgColor:'%(mark_50)s', labelBoxBorderColor:'%(mark)s',
-    labelTextColor:'%(brand)s', loopTextColor:'%(n700)s',
-    noteBkgColor:'%(mark_50)s', noteBorderColor:'%(mark)s',
-    noteTextColor:'%(brand)s', altBackground:'%(n50)s'
-  }
+  themeVariables:%(theme)s
 });
 // Ширину узлов mermaid считает по метрикам шрифта. Пока текста этим шрифтом
 // на странице нет, браузер его не запрашивает, поэтому просим начертания сами:
@@ -693,8 +787,7 @@ for (const svg of document.querySelectorAll('.dg-mermaid svg')) {
   svg.style.width = 'auto';
   svg.style.height = 'auto';
 }
-""" % {"body": fonts.body, "edge_label_bg": edge_label_bg,
-       **colors, **neutrals}
+""" % {"body": fonts.body, "theme": json.dumps(theme, ensure_ascii=False)}
 
 
 COVER_TPL = """<!doctype html>
@@ -913,14 +1006,16 @@ def render_pdf(blocks: list[tuple], front: dict, out_path: pathlib.Path,
     fonts = brands.fonts_for(brand, front.get("font"))
     fonts_css = fonts_css_path(fonts.key).read_text(encoding="utf-8")
     scheme = front.get("scheme")
+    doc_style = scheme_style(scheme, brand)
     content = render(blocks, brand, numbered=numbered, scheme=scheme)
 
     mermaid_tag = ""
     if has_mermaid:
         lib = (ASSETS / "mermaid.min.js").read_text(encoding="utf-8")
-        mermaid_tag = (f"<script>{lib}</script>"
+        mermaid_tag = (f"<style>{scheme_css(doc_style)}</style>"
+                       f"<script>{lib}</script>"
                        f"<script type=\"module\">"
-                       f"{mermaid_init(brand, fonts, diagram_scheme(scheme)['dark'])}"
+                       f"{mermaid_init(brand, fonts, doc_style)}"
                        "</script>")
 
     stem = re.sub(r"[^\w.-]+", "_", name)[:50] + f"-{os.getpid()}-{id(blocks) & 0xffff:x}"
@@ -958,12 +1053,12 @@ def render_pdf(blocks: list[tuple], front: dict, out_path: pathlib.Path,
 def diagram_html(sources: list[str], brand: brands.Brand, fonts: brands.Fonts,
                  scheme: str | None = None) -> str:
     """Страница с диаграммами: по одной на лист, в цветах бренда."""
-    preset = diagram_scheme(scheme)
+    style = scheme_style(scheme, brand)
     fonts_css = fonts_css_path(fonts.key).read_text(encoding="utf-8")
     lib = (ASSETS / "mermaid.min.js").read_text(encoding="utf-8")
     body = "".join(
         '<div class="page"><div class="dg dg-mermaid"><pre class="mermaid">'
-        f'{html.escape(theme_diagram(src, brand, preset["dark"]))}'
+        f'{html.escape(theme_diagram(src, brand, style))}'
         "</pre></div></div>" for src in sources)
     return ('<!doctype html><html lang="ru"><head><meta charset="utf-8">'
             f"<style>{fonts_css}</style>"
@@ -972,14 +1067,15 @@ def diagram_html(sources: list[str], brand: brands.Brand, fonts: brands.Fonts,
             "body{background:none}"
             ".page{break-after:page;display:flex;align-items:center;"
             "justify-content:center;height:281mm}"
-            ".dg{border:0;margin:0;padding:4mm;width:100%;"
-            f'{preset["css"]}'
+            ".dg{border:0;margin:0;padding:6mm;width:100%;"
+            f'{style["backdrop"]}'
             "}"
             ".dg-mermaid svg{max-height:275mm}"
+            f"{scheme_css(style)}"
             f"</style></head><body>{body}"
             f"<script>{lib}</script>"
             '<script type="module">'
-            f'{mermaid_init(brand, fonts, preset["dark"])}</script>'
+            f'{mermaid_init(brand, fonts, style)}</script>'
             "</body></html>")
 
 
@@ -1011,7 +1107,7 @@ def diagram_images(sources: list[str], front: dict, chrome: str | None = None,
     html_path = TMP / f"{stem}-dg.html"
     pdf_path = TMP / f"{stem}-dg.pdf"
     key = scheme if scheme is not None else front.get("scheme")
-    preset = diagram_scheme(key)
+    preset = scheme_style(key, brand)
     html_path.write_text(diagram_html(sources, brand, fonts, key),
                          encoding="utf-8")
     try:

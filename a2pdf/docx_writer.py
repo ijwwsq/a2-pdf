@@ -187,9 +187,11 @@ def _plain(text: str) -> str:
 
 
 def _diagram_images(sources: list[str], theme: "Theme", chrome: str,
-                    name: str) -> list[tuple[bytes, float]]:
+                    name: str, scheme: str | None = None
+                    ) -> list[tuple[bytes, float]]:
     front = {"brand": theme.brand.key, "font": theme.fonts.key}
-    return core.diagram_images(sources, front, chrome=chrome, dpi=DPI, name=name)
+    return core.diagram_images(sources, front, chrome=chrome, dpi=DPI, name=name,
+                               scheme=scheme)
 
 
 def _load_image(src: str) -> bytes | None:
@@ -436,7 +438,7 @@ def write_docx(blocks: list[tuple], front: dict, out_path: pathlib.Path,
     _runners(document, theme, front)
 
     diagrams = _diagram_images([b[1] for b in blocks if b[0] == "mermaid"],
-                               theme, chrome, name)
+                               theme, chrome, name, front.get("scheme"))
     diagram_no = 0
     numbered = str(front.get("numbered", "true")).lower() not in ("false", "0", "no")
     section_no = 0

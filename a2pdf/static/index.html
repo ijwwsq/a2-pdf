@@ -66,21 +66,17 @@ header{background:var(--navy);color:#fff;padding:16px 28px;display:flex;
 .tabs button:hover{color:var(--n800)}
 .tabs button.on{background:var(--n0);color:var(--navy);box-shadow:var(--sh-sm)}
 .tabs svg{width:15px;height:15px}
+[hidden]{display:none!important}
 .kinds{display:flex;gap:6px;margin-bottom:10px}
 .kinds button{border:1px solid var(--n200);background:var(--n0);color:var(--n500);
   font:600 12px var(--font);padding:5px 11px;border-radius:20px;cursor:pointer}
 .kinds button:hover{border-color:var(--blue);color:var(--n800)}
 .kinds button.on{border-color:var(--navy);color:var(--navy)}
-.thumb.sch{display:flex;align-items:center;justify-content:center;background:var(--n0);
+.thumb.sch{display:flex;align-items:center;justify-content:center;gap:0;
   border:1px solid var(--n200)}
-.thumb.sch i{position:static;width:22px;height:12px;border-radius:2px;
-  border:1px solid var(--navy);background:var(--blue-50);transform:none}
+.thumb.sch i{position:static;width:20px;height:13px;border-radius:3px;transform:none}
+.thumb.sch .wire{width:9px;height:1.5px;flex:none}
 .thumb.sch u{display:none}
-.thumb.sch-card{background:var(--blue-50)}
-.thumb.sch-dark{background:var(--navy);border-color:var(--navy)}
-.thumb.sch-dark i{border-color:var(--n0);background:rgba(255,255,255,.22)}
-.thumb.sch-clear{background:repeating-conic-gradient(var(--n100) 0 25%,var(--n0) 0 50%)
-  50%/12px 12px}
 .panes{min-height:196px}
 .pane{display:none}
 .pane.on{display:block}
@@ -423,7 +419,8 @@ function paint(brand) {
   root.setProperty('--amber', brand.colors.mark);
   $('logo').src = `/logo/${brand.key}-white`;
   document.title = brand.name + ' · Документы';
-  drawTemplates();
+  // миниатюры пресетов набраны цветами организации, поэтому берём их заново
+  loadSchemes().then(drawPanel);
 }
 
 function selectOrg(key) {
@@ -469,6 +466,11 @@ function drawPanel() {
   $('tpl-title').textContent = schema ? 'Шаблон схемы' : 'Шаблон';
   $('fmt-png').hidden = !schema;
   if (!schema && format === 'png') setFormat('pdf');
+  // у схемы нет ни обложки, ни колонтитулов — прячем настройки документа
+  $('toggle').hidden = schema;
+  if (schema) { $('more').hidden = true; $('toggle').classList.remove('on'); }
+  // режим схемы включают ради картинки, поэтому сразу предлагаем её
+  if (schema && format !== 'png') setFormat('png');
   if (schema) drawSchemes(); else drawTemplates();
 }
 document.querySelectorAll('.tabs button').forEach(b =>
@@ -491,27 +493,15 @@ const TEMPLATES = [
 ];
 let template = 'plain';
 
-// у схем свои шаблоны: подложка вокруг диаграммы, а не обложка документа
-const SCHEMES = [
-  {id:'plain', name:'Чистая',      note:'белый фон'},
-  {id:'card',  name:'Карточка',    note:'фирменная подложка'},
-  {id:'dark',  name:'Тёмная',      note:'для слайдов'},
-  {id:'clear', name:'Прозрачная',  note:'PNG без фона'}
-];
-let scheme = 'plain';
+// у схем свои шаблоны: они меняют не только подложку, но и цвета элементов
+let SCHEMES = [];
+let scheme = 'outline';
 
-function drawSchemes() {
-  $('templates').innerHTML = SCHEMES.map(s => `
-    <button type="button" class="tpl${s.id === scheme ? ' on' : ''}" data-sch="${s.id}">
-      <span class="thumb sch sch-${s.id}"><i></i><u class="t"></u><u class="s"></u></span>
-      <b>${s.name}</b><span class="note">${s.note}</span></button>`).join('');
-  document.querySelectorAll('[data-sch]').forEach(b =>
-    b.addEventListener('click', () => {
-      scheme = b.dataset.sch;
-      document.querySelectorAll('[data-sch]').forEach(x =>
-        x.classList.toggle('on', x.dataset.sch === scheme));
-      refresh();
-    }));
+function loadSchemes() {
+  return fetch('/schemes?brand=' + encodeURIComponent(org))
+    .then(r => r.json())
+    .then(data => { SCHEMES = data.schemes || []; })
+    .catch(() => { SCHEMES = []; });
 }
 
 function drawTemplates() {
@@ -526,6 +516,33 @@ function drawTemplates() {
   }).join('');
   document.querySelectorAll('.tpl').forEach(b =>
     b.addEventListener('click', () => applyTemplate(b.dataset.tpl)));
+}
+
+function drawSchemes() {
+  if (!SCHEMES.length) { loadSchemes().then(drawPanel); return; }
+  if (!SCHEMES.some(s => s.key === scheme)) scheme = SCHEMES[0].key;
+  $('templates').innerHTML = SCHEMES.map(s => {
+    const p = s.preview || {};
+    const bg = p.bg
+      ? `background:${p.bg}`
+      : 'background:repeating-conic-gradient(var(--n100) 0 25%,var(--n0) 0 50%)' +
+        ' 50%/10px 10px';
+    const node = `background:${p.fill};border:1.5px solid ${p.stroke}`;
+    return `<button type="button" class="tpl${s.key === scheme ? ' on' : ''}"
+      data-sch="${s.key}">
+      <span class="thumb sch" style="${bg}">
+        <i style="${node}"></i><span class="wire"
+          style="background:${p.stroke}"></span><i style="${node}"></i>
+      </span>
+      <b>${s.title}</b><span class="note">${s.note}</span></button>`;
+  }).join('');
+  document.querySelectorAll('[data-sch]').forEach(b =>
+    b.addEventListener('click', () => {
+      scheme = b.dataset.sch;
+      document.querySelectorAll('[data-sch]').forEach(x =>
+        x.classList.toggle('on', x.dataset.sch === scheme));
+      refresh();
+    }));
 }
 
 function applyTemplate(id) {
