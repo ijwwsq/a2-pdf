@@ -1,0 +1,904 @@
+/*
+ * The right-hand properties / inspector panel for the visual editor.
+ */
+
+import type { DiagramCanvas } from "./canvas";
+import {
+	DiagramEdge,
+	DiagramModel,
+	DiagramNode,
+	DiagramGroup,
+	EDGE_KINDS,
+	EDGE_LABELS,
+	NODE_SHAPES,
+	SHAPE_LABELS,
+	assignNodeToGroup,
+	canBeParentOf,
+	groupOf,
+	hasEdgeStyle,
+	hasStyle,
+	newGroupId,
+} from "./model";
+import { EDGE_PRESETS, STYLE_PRESETS } from "./presets";
+
+export interface PanelOps {
+	commit(): void;
+	render(): void;
+	quickAddStep(): void;
+	quickAddBranch(): void;
+	quickAddChild(): void;
+	applyStylePreset(id: string): void;
+	duplicateSelected(): void;
+	deleteSelected(): void;
+	ungroupSelected(): void;
+	reverseSelectedEdge(): void;
+	/** Prompt for a note to link the selected node to; resolves to a wiki link or null. */
+	pickLink(): Promise<string | null>;
+	/** Open a node's link target (Obsidian note or external URL). */
+	openLink(target: string): void;
+}
+
+export class PropertiesPanel {
+	private panelEl: HTMLElement;
+	private getModel: () => DiagramModel;
+	private getCanvas: () => DiagramCanvas;
+	private ops: PanelOps;
+
+	private focusLabelOnBuild = false;
+	/** Start each collapsible section closed instead of open. */
+	private collapseSections: boolean;
+
+	constructor(
+		panelEl: HTMLElement,
+		getModel: () => DiagramModel,
+		getCanvas: () => DiagramCanvas,
+		ops: PanelOps,
+		collapseSections = false,
+	) {
+		this.panelEl = panelEl;
+		this.getModel = getModel;
+		this.getCanvas = getCanvas;
+		this.ops = ops;
+		this.collapseSections = collapseSections;
+	}
+
+	/**
+	 * Opt in to auto-focusing the label field on the *next* refresh only.
+	 * Call before triggering a selection change that should invite an
+	 * immediate rename (new node, duplicate, paste) — plain re-selection of
+	 * an existing node must NOT steal focus into the input, or the keyboard
+	 * Delete/Backspace shortcut silently edits the label text instead of
+	 * removing the node.
+	 */
+	focusLabelOnNextBuild(): void {
+		this.focusLabelOnBuild = true;
+	}
+
+	refresh(): HTMLTextAreaElement | null {
+		this.sectionParent = null;
+		const canvas = this.getCanvas();
+		const model = this.getModel();
+		const sel = canvas.getSelection();
+		const multi = canvas.getMultiSelection();
+		this.panelEl.empty();
+
+		// Multi-selection batch style panel
+		if (multi.length > 1) {
+			const result = this.buildMultiPanel(multi, model);
+			this.endSection();
+			return result;
+		}
+
+		if (!sel) {
+			const empty = model.nodes.length === 0;
+			this.panelEl.createEl("h3", { text: empty ? "Get started" : "Properties" });
+			const hint = this.panelEl.createDiv({ cls: "mermaid-flow-hint" });
+			hint.createEl("p", {
+				text: empty
+					? "Build a flowchart visually — no Mermaid syntax needed."
+					: "Select a node or edge to edit it.",
+			});
+			const list = hint.createEl("ul");
+			list.createEl("li", { text: "Click a shape in the toolbar to add a node." });
+			list.createEl("li", { text: "Drag a node to move it; drag a blue edge dot to connect." });
+			list.createEl("li", { text: "Shift-click or drag a box to select several nodes." });
+			list.createEl("li", { text: "Right-click a node or edge for more actions." });
+			this.buildDiagramSection(model);
+			this.endSection();
+			this.panelEl.createDiv({
+				cls: "mermaid-flow-stats",
+				text: `${model.nodes.length} nodes · ${model.edges.length} edges`,
+			});
+			return null;
+		}
+
+		if (sel.type === "node") {
+			const result = this.buildNodePanel(sel.id, model);
+			this.endSection();
+			return result;
+		}
+		if (sel.type === "edge") {
+			this.buildEdgePanel(sel.id, model);
+			this.endSection();
+			return null;
+		}
+		this.buildGroupPanel(sel.id, model);
+		this.endSection();
+		return null;
+	}
+
+	/** Returns the label textarea so the coordinator can focus it for F2. */
+	getLabelInput(): HTMLTextAreaElement | null {
+		return this.panelEl.querySelector<HTMLTextAreaElement>("textarea.mermaid-flow-textarea");
+	}
+
+	// --- multi-select batch panel -------------------------------------------
+
+	private buildMultiPanel(ids: string[], model: DiagramModel): null {
+		const nodes = ids
+			.map((id) => model.nodes.find((n) => n.id === id))
+			.filter((n): n is DiagramNode => n !== undefined);
+
+		this.panelEl.createEl("h3", { text: `${ids.length} nodes selected` });
+		this.panelEl.createDiv({
+			cls: "mermaid-flow-hint",
+			text: "Style changes apply to all selected nodes.",
+		});
+
+		this.panelEl.createEl("h4", { cls: "mermaid-flow-subhead", text: "Style as" });
+		const chipRow = this.panelEl.createDiv({ cls: "mermaid-flow-chip-row" });
+		for (const preset of STYLE_PRESETS) {
+			const chip = chipRow.createEl("button", {
+				cls: "mermaid-flow-chip",
+				text: preset.label,
+			});
+			chip.style.setProperty("border-color", preset.style.strokeColor ?? "");
+			chip.addEventListener("click", () => {
+				for (const n of nodes) {
+					n.shape = preset.shape;
+					n.style = { ...preset.style };
+				}
+				this.ops.render();
+				this.ops.commit();
+				this.refresh();
+			});
+		}
+
+		this.panelEl.createEl("h4", { cls: "mermaid-flow-subhead", text: "Text & style" });
+
+		this.colorField("Fill color", undefined, "#ffffff", (value) => {
+			for (const n of nodes) { if (!n.style) n.style = {}; n.style.fillColor = value; }
+			this.ops.render(); this.ops.commit();
+		});
+		this.colorField("Border color", undefined, "#888888", (value) => {
+			for (const n of nodes) { if (!n.style) n.style = {}; n.style.strokeColor = value; }
+			this.ops.render(); this.ops.commit();
+		});
+		this.colorField("Text color", undefined, "#333333", (value) => {
+			for (const n of nodes) { if (!n.style) n.style = {}; n.style.textColor = value; }
+			this.ops.render(); this.ops.commit();
+		});
+
+		const resetRow = this.panelEl.createDiv({ cls: "mermaid-flow-panel-buttons" });
+		resetRow.createEl("button", {
+			text: "Reset style for all",
+			cls: "mermaid-flow-panel-btn mod-warning",
+		}).addEventListener("click", () => {
+			for (const n of nodes) n.style = undefined;
+			this.ops.render(); this.ops.commit(); this.refresh();
+		});
+
+		return null;
+	}
+
+	// --- diagram-level section ----------------------------------------------
+
+	private buildDiagramSection(model: DiagramModel): void {
+		this.sectionHead("Diagram");
+		const field = this.panelEl.createDiv({ cls: "mermaid-flow-field-inline" });
+		field.createEl("label", { text: "Background" });
+		const controls = field.createDiv({ cls: "mermaid-flow-bg-controls" });
+
+		const color = controls.createEl("input", {
+			type: "color",
+			attr: { "aria-label": "Diagram background color" },
+		});
+		color.value = model.config.background ?? "#ffffff";
+
+		const transparent = controls.createEl("button", {
+			cls: "mermaid-flow-chip",
+			text: "Transparent",
+		});
+		transparent.toggleClass("is-active", !model.config.background);
+
+		color.addEventListener("input", () => {
+			model.config.background = color.value;
+			transparent.toggleClass("is-active", false);
+			this.getCanvas().refreshBackground();
+			this.ops.commit();
+		});
+		transparent.addEventListener("click", () => {
+			delete model.config.background;
+			transparent.toggleClass("is-active", true);
+			this.getCanvas().refreshBackground();
+			this.ops.commit();
+		});
+	}
+
+	// --- node class section ---------------------------------------------------
+
+	/** Remembered "Edit class" pick so the selection survives panel refreshes. */
+	private classEditName: string | null = null;
+
+	private buildNodeClassSection(node: DiagramNode, model: DiagramModel): void {
+		this.sectionHead("Classes");
+
+		// All known class names: declared classDefs first, then names referenced
+		// on nodes without a matching classDef (so parsed docs show everything).
+		const names: string[] = model.classDefs.map((c) => c.name);
+		for (const n of model.nodes) {
+			for (const c of n.classes ?? []) {
+				if (!names.includes(c)) names.push(c);
+			}
+		}
+		for (const g of model.groups) {
+			for (const c of g.classes ?? []) {
+				if (!names.includes(c)) names.push(c);
+			}
+		}
+
+		if (names.length > 0) {
+			const row = this.panelEl.createDiv({ cls: "mermaid-flow-chip-row" });
+			for (const name of names) {
+				const chip = row.createEl("button", {
+					cls: "mermaid-flow-chip",
+					text: name,
+				});
+				chip.toggleClass("is-active", node.classes?.includes(name) ?? false);
+				chip.addEventListener("click", () => {
+					if (node.classes?.includes(name)) {
+						node.classes = node.classes.filter((c) => c !== name);
+						if (node.classes.length === 0) delete node.classes;
+					} else {
+						(node.classes ??= []).push(name);
+					}
+					this.ops.render();
+					this.ops.commit();
+					this.refresh();
+				});
+			}
+		} else {
+			this.panelEl.createDiv({
+				cls: "mermaid-flow-hint",
+				text: "No classes yet — add one to create a reusable style shared by several nodes.",
+			});
+		}
+
+		// Create a new class and assign it to this node.
+		const addRow = this.panelEl.createDiv({ cls: "mermaid-flow-field-inline" });
+		const input = addRow.createEl("input", {
+			type: "text",
+			cls: "mermaid-flow-input",
+			attr: { placeholder: "New class name", "aria-label": "New class name" },
+		});
+		const addBtn = addRow.createEl("button", {
+			text: "Add",
+			cls: "mermaid-flow-panel-btn",
+			attr: { "aria-label": "Create class and assign to this node" },
+		});
+		const addClass = () => {
+			const name = input.value.trim();
+			if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(name)) return;
+			if (!model.classDefs.some((c) => c.name === name)) {
+				model.classDefs.push({ name, style: {} });
+			}
+			if (!node.classes?.includes(name)) (node.classes ??= []).push(name);
+			this.classEditName = name;
+			this.ops.render();
+			this.ops.commit();
+			this.refresh();
+		};
+		addBtn.addEventListener("click", addClass);
+		input.addEventListener("keydown", (e) => {
+			if (e.key === "Enter") addClass();
+		});
+
+		// Edit a classDef's colours (changes apply to every node using it).
+		const allClassNames = names;
+		if (allClassNames.length === 0) return;
+		const target =
+			this.classEditName && allClassNames.includes(this.classEditName)
+				? this.classEditName
+				: (node.classes?.find((c) => allClassNames.includes(c)) ?? allClassNames[0]);
+		if (!target) return;
+		this.classEditName = target;
+		const def = model.classDefs.find((c) => c.name === target);
+		this.selectField("Edit class", allClassNames, (n) => n, target, (v) => {
+			this.classEditName = v;
+			this.refresh();
+		});
+		if (def) {
+			this.colorField("Class fill", def.style.fillColor, "#ffffff", (v) => {
+				def.style.fillColor = v;
+				this.ops.render();
+				this.ops.commit();
+			});
+			this.colorField("Class border", def.style.strokeColor, "#888888", (v) => {
+				def.style.strokeColor = v;
+				this.ops.render();
+				this.ops.commit();
+			});
+			this.colorField("Class text", def.style.textColor, "#333333", (v) => {
+				def.style.textColor = v;
+				this.ops.render();
+				this.ops.commit();
+			});
+		}
+		this.dangerButton(`Delete class "${target}"`, () => {
+			model.classDefs = model.classDefs.filter((c) => c.name !== target);
+			for (const n of model.nodes) {
+				if (n.classes?.includes(target)) {
+					n.classes = n.classes.filter((c) => c !== target);
+					if (n.classes.length === 0) delete n.classes;
+				}
+			}
+			for (const g of model.groups) {
+				if (g.classes?.includes(target)) {
+					g.classes = g.classes.filter((c) => c !== target);
+					if (g.classes.length === 0) delete g.classes;
+				}
+			}
+			this.classEditName = null;
+			this.ops.render();
+			this.ops.commit();
+			this.refresh();
+		});
+	}
+
+	// --- group panel --------------------------------------------------------
+
+	private buildGroupPanel(id: string, model: DiagramModel): void {
+		const group = model.groups.find((g) => g.id === id);
+		if (!group) return;
+		this.panelEl.createEl("h3", { text: "Subgraph" });
+		this.panelEl.createDiv({
+			cls: "mermaid-flow-field-readonly",
+			text: `id: ${group.id} · ${group.nodeIds.length} nodes`,
+		});
+		this.labelField("Title", group.title, (value) => {
+			group.title = value;
+			this.ops.render();
+			this.ops.commit();
+		});
+		this.buildGroupParentField(group, model);
+		this.panelEl.createDiv({
+			cls: "mermaid-flow-hint",
+			text: "Drag the title bar to move the whole group. Assign more nodes from each node's panel.",
+		});
+		this.dangerButton("Ungroup (keep nodes)", () => this.ops.ungroupSelected());
+	}
+
+	// --- node panel ---------------------------------------------------------
+
+	private buildNodePanel(id: string, model: DiagramModel): HTMLTextAreaElement | null {
+		const node = model.nodes.find((n) => n.id === id);
+		if (!node) return null;
+
+		this.panelEl.createEl("h3", { text: "Node" });
+		this.panelEl.createDiv({ cls: "mermaid-flow-field-readonly", text: `id: ${node.id}` });
+
+		this.sectionHead("Content");
+		const labelInput = this.labelField("Label", node.label, (value) => {
+			node.label = value;
+			this.ops.render();
+			this.ops.commit();
+		});
+		this.linkField(node);
+
+		this.sectionHead("Shape & size");
+		this.selectField("Shape", NODE_SHAPES, (s) => SHAPE_LABELS[s], node.shape, (value) => {
+			node.shape = value;
+			this.ops.render();
+			this.ops.commit();
+		});
+		this.buildNodeSizeField(node);
+		this.buildNodeGroupField(node, model);
+
+		this.buildStyleAsRow();
+		this.buildNodeStyleSection(node);
+		this.buildNodeClassSection(node, model);
+		this.endSection();
+		this.buildQuickAddRow();
+
+		// Lock toggle
+		const lockRow = this.panelEl.createDiv({ cls: "mermaid-flow-field-inline" });
+		lockRow.createEl("label", { text: "Lock position" });
+		const lockToggle = lockRow.createEl("input", { type: "checkbox" });
+		lockToggle.checked = !!node.locked;
+		lockToggle.addEventListener("change", () => {
+			node.locked = lockToggle.checked || undefined;
+			this.ops.render();
+			this.ops.commit();
+		});
+
+		const actionsRow = this.panelEl.createDiv({ cls: "mermaid-flow-panel-buttons mermaid-flow-panel-buttons-row" });
+		actionsRow.createEl("button", {
+			text: "Duplicate",
+			cls: "mermaid-flow-panel-btn",
+		}).addEventListener("click", () => this.ops.duplicateSelected());
+		actionsRow.createEl("button", {
+			text: "Delete node",
+			cls: "mermaid-flow-panel-btn mod-warning",
+		}).addEventListener("click", () => this.ops.deleteSelected());
+
+		return labelInput;
+	}
+
+	private buildNodeSizeField(node: DiagramNode): void {
+		const size = this.getCanvas().effectiveSize(node.id);
+		const row = this.panelEl.createDiv({ cls: "mermaid-flow-field" });
+		row.createEl("label", { text: "Size" });
+		const inputs = row.createDiv({ cls: "mermaid-flow-size-row" });
+
+		inputs.createSpan({ cls: "mermaid-flow-size-affix", text: "W" });
+		const wInput = inputs.createEl("input", {
+			type: "number",
+			cls: "mermaid-flow-input",
+			attr: { "aria-label": "Node width" },
+		});
+		wInput.value = String(node.w ?? size.w);
+		inputs.createSpan({ cls: "mermaid-flow-size-affix", text: "H" });
+		const hInput = inputs.createEl("input", {
+			type: "number",
+			cls: "mermaid-flow-input",
+			attr: { "aria-label": "Node height" },
+		});
+		hInput.value = String(node.h ?? size.h);
+
+		const apply = () => {
+			const w = parseInt(wInput.value, 10);
+			const h = parseInt(hInput.value, 10);
+			if (!Number.isNaN(w)) node.w = Math.max(48, w);
+			if (!Number.isNaN(h)) node.h = Math.max(32, h);
+			this.ops.render();
+			this.ops.commit();
+		};
+		wInput.addEventListener("change", apply);
+		hInput.addEventListener("change", apply);
+
+		row.createEl("button", { cls: "mermaid-flow-chip", text: "Auto size" })
+			.addEventListener("click", () => {
+				delete node.w;
+				delete node.h;
+				this.ops.render();
+				this.refresh();
+				this.ops.commit();
+			});
+	}
+
+	private buildNodeGroupField(node: DiagramNode, model: DiagramModel): void {
+		const field = this.panelEl.createDiv({ cls: "mermaid-flow-field" });
+		field.createEl("label", { text: "Subgraph" });
+		const select = field.createEl("select", { cls: "dropdown mermaid-flow-input" });
+		const current = groupOf(model, node.id);
+		select.createEl("option", { text: "(none)", value: "__none__" });
+		for (const g of model.groups) {
+			const o = select.createEl("option", { text: g.title || g.id, value: g.id });
+			if (current && current.id === g.id) o.selected = true;
+		}
+		select.createEl("option", { text: "+ New subgraph", value: "__new__" });
+		select.addEventListener("change", () => {
+			const v = select.value;
+			if (v === "__new__") {
+				const id = newGroupId(model);
+				const num = model.groups.length + 1;
+				model.groups.push({ id, title: `Subgraph ${num}`, nodeIds: [node.id] });
+				assignNodeToGroup(model, node.id, id);
+			} else {
+				assignNodeToGroup(model, node.id, v === "__none__" ? null : v);
+			}
+			this.ops.render();
+			this.ops.commit();
+			this.refresh();
+		});
+	}
+
+	/** Parent subgraph selector for a subgraph (nested subgraphs). */
+	private buildGroupParentField(group: DiagramGroup, model: DiagramModel): void {
+		const field = this.panelEl.createDiv({ cls: "mermaid-flow-field" });
+		field.createEl("label", { text: "Parent subgraph" });
+		const select = field.createEl("select", { cls: "dropdown mermaid-flow-input" });
+		
+		// Add "(none)" option for root-level subgraphs
+		const noneOption = select.createEl("option", { text: "(none)", value: "__none__" });
+		if (!group.parentId) noneOption.selected = true;
+		
+		// Add all valid parent candidates (excluding self and descendants)
+		for (const g of model.groups) {
+			if (g.id === group.id) continue; // Skip self
+			if (!canBeParentOf(model, g.id, group.id)) continue; // Skip descendants
+			
+			const option = select.createEl("option", { text: g.title || g.id, value: g.id });
+			if (group.parentId === g.id) option.selected = true;
+		}
+		
+		select.addEventListener("change", () => {
+			const v = select.value;
+			if (v === "__none__") {
+				delete group.parentId;
+			} else {
+				group.parentId = v;
+			}
+			this.ops.render();
+			this.ops.commit();
+			this.refresh();
+		});
+	}
+
+	private buildStyleAsRow(): void {
+		this.panelEl.createEl("h4", { cls: "mermaid-flow-subhead", text: "Style as" });
+		const row = this.panelEl.createDiv({ cls: "mermaid-flow-chip-row" });
+		for (const preset of STYLE_PRESETS) {
+			const chip = row.createEl("button", { cls: "mermaid-flow-chip", text: preset.label });
+			chip.style.setProperty("border-color", preset.style.strokeColor ?? "");
+			chip.addEventListener("click", () => this.ops.applyStylePreset(preset.id));
+		}
+	}
+
+	private buildNodeStyleSection(node: DiagramNode): void {
+		this.panelEl.createEl("h4", { cls: "mermaid-flow-subhead", text: "Text & style" });
+
+		this.numberField("Font size (px)", node.style?.fontSize, (value) => {
+			const s = this.ensureStyle(node);
+			if (value === null) delete s.fontSize;
+			else s.fontSize = value;
+			this.afterStyleChange(node);
+		});
+		this.colorField("Text color", node.style?.textColor, "#e0e0e0", (value) => {
+			this.ensureStyle(node).textColor = value;
+			this.afterStyleChange(node);
+		});
+		this.colorField("Fill color", node.style?.fillColor, "#ffffff", (value) => {
+			this.ensureStyle(node).fillColor = value;
+			this.afterStyleChange(node);
+		});
+		this.colorField("Border color", node.style?.strokeColor, "#888888", (value) => {
+			this.ensureStyle(node).strokeColor = value;
+			this.afterStyleChange(node);
+		});
+		this.fontFamilyField(node.style?.fontFamily, (value) => {
+			const s = this.ensureStyle(node);
+			if (value === "") delete s.fontFamily;
+			else s.fontFamily = value;
+			this.afterStyleChange(node);
+		});
+
+		const resetRow = this.panelEl.createDiv({ cls: "mermaid-flow-panel-buttons" });
+		resetRow.createEl("button", { text: "Reset style", cls: "mermaid-flow-panel-btn" })
+			.addEventListener("click", () => {
+				node.style = undefined;
+				this.ops.render();
+				this.ops.commit();
+				this.refresh();
+			});
+	}
+
+	private buildQuickAddRow(): void {
+		this.panelEl.createEl("h4", { cls: "mermaid-flow-subhead", text: "Quick add" });
+		const row = this.panelEl.createDiv({ cls: "mermaid-flow-chip-row" });
+		const mk = (label: string, fn: () => void) =>
+			row.createEl("button", { cls: "mermaid-flow-chip", text: label })
+				.addEventListener("click", fn);
+		mk("Step after", () => this.ops.quickAddStep());
+		mk("Parallel sibling", () => this.ops.quickAddChild());
+		mk("Yes/No branch", () => this.ops.quickAddBranch());
+	}
+
+	// --- edge panel ---------------------------------------------------------
+
+	private buildEdgePanel(id: string, model: DiagramModel): void {
+		const edge = model.edges.find((e) => e.id === id);
+		if (!edge) return;
+		this.panelEl.createEl("h3", { text: "Edge" });
+		this.panelEl.createDiv({
+			cls: "mermaid-flow-field-readonly",
+			text: `${edge.from} → ${edge.to}`,
+		});
+
+		this.labelField("Label", edge.label, (value) => {
+			edge.label = value;
+			this.ops.render();
+			this.ops.commit();
+		});
+
+		this.selectField("Type", EDGE_KINDS, (k) => EDGE_LABELS[k], edge.kind, (value) => {
+			edge.kind = value;
+			this.ops.render();
+			this.ops.commit();
+		});
+
+		this.buildEdgePresetsRow(edge);
+		this.buildEdgeStyleSection(edge);
+
+		// Animated toggle
+		const animRow = this.panelEl.createDiv({ cls: "mermaid-flow-field-inline" });
+		animRow.createEl("label", { text: "Animated" });
+		const animToggle = animRow.createEl("input", { type: "checkbox" });
+		animToggle.checked = !!edge.animated;
+		animToggle.addEventListener("change", () => {
+			edge.animated = animToggle.checked || undefined;
+			this.ops.render();
+			this.ops.commit();
+		});
+
+		const btnRow = this.panelEl.createDiv({ cls: "mermaid-flow-panel-buttons" });
+		btnRow.createEl("button", { text: "Reverse direction", cls: "mermaid-flow-panel-btn" })
+			.addEventListener("click", () => this.ops.reverseSelectedEdge());
+
+		this.dangerButton("Delete edge", () => this.ops.deleteSelected());
+	}
+
+	private buildEdgePresetsRow(edge: DiagramEdge): void {
+		this.panelEl.createEl("h4", { cls: "mermaid-flow-subhead", text: "Preset style" });
+		const row = this.panelEl.createDiv({ cls: "mermaid-flow-chip-row" });
+		for (const preset of EDGE_PRESETS) {
+			const chip = row.createEl("button", { cls: "mermaid-flow-chip", text: preset.label });
+			chip.addEventListener("click", () => {
+				edge.kind = preset.kind;
+				edge.style = { ...preset.style };
+				this.ops.render();
+				this.ops.commit();
+				this.refresh();
+			});
+		}
+	}
+
+	private buildEdgeStyleSection(edge: DiagramEdge): void {
+		this.panelEl.createEl("h4", { cls: "mermaid-flow-subhead", text: "Line & label style" });
+
+		this.colorField("Line color", edge.style?.strokeColor, "#888888", (value) => {
+			this.ensureEdgeStyle(edge).strokeColor = value;
+			this.afterEdgeStyleChange(edge);
+		});
+		this.numberField("Line width (px)", edge.style?.strokeWidth, (value) => {
+			const s = this.ensureEdgeStyle(edge);
+			if (value === null) delete s.strokeWidth;
+			else s.strokeWidth = value;
+			this.afterEdgeStyleChange(edge);
+		});
+		this.colorField("Label color", edge.style?.textColor, "#e0e0e0", (value) => {
+			this.ensureEdgeStyle(edge).textColor = value;
+			this.afterEdgeStyleChange(edge);
+		});
+		this.numberField("Label size (px)", edge.style?.fontSize, (value) => {
+			const s = this.ensureEdgeStyle(edge);
+			if (value === null) delete s.fontSize;
+			else s.fontSize = value;
+			this.afterEdgeStyleChange(edge);
+		});
+
+		const resetRow = this.panelEl.createDiv({ cls: "mermaid-flow-panel-buttons" });
+		resetRow.createEl("button", { text: "Reset style", cls: "mermaid-flow-panel-btn" })
+			.addEventListener("click", () => {
+				edge.style = undefined;
+				this.ops.render();
+				this.ops.commit();
+				this.refresh();
+			});
+	}
+
+	// --- shared field helpers -----------------------------------------------
+
+	/** Parent panel while a collapsible section redirects writes into its body. */
+	private sectionParent: HTMLElement | null = null;
+
+	private sectionHead(text: string): void {
+		this.endSection();
+		const details = this.panelEl.createEl("details", {
+			cls: "mermaid-flow-section",
+		});
+		details.open = !this.collapseSections;
+		details.createEl("summary", { cls: "mermaid-flow-subhead", text });
+		const body = details.createDiv({ cls: "mermaid-flow-section-body" });
+		this.sectionParent = this.panelEl;
+		this.panelEl = body;
+	}
+
+	private endSection(): void {
+		if (!this.sectionParent) return;
+		this.panelEl = this.sectionParent;
+		this.sectionParent = null;
+	}
+
+	private labelField(
+		label: string,
+		value: string,
+		onInput: (value: string) => void,
+	): HTMLTextAreaElement {
+		const field = this.panelEl.createDiv({ cls: "mermaid-flow-field" });
+		field.createEl("label", { text: label });
+		const textarea = field.createEl("textarea", { cls: "mermaid-flow-textarea" });
+		textarea.value = value;
+		textarea.rows = 1;
+		
+		// Auto-resize textarea based on content
+		const autoResize = () => {
+			textarea.setCssStyles({ height: "auto" });
+			textarea.setCssStyles({ height: `${textarea.scrollHeight}px` });
+		};
+		
+		// Initial resize synchronously to avoid visual jump
+		autoResize();
+		
+		textarea.addEventListener("input", () => {
+			autoResize();
+			onInput(textarea.value);
+		});
+		
+		// Handle Enter key: plain Enter commits, Shift+Enter adds newline
+		textarea.addEventListener("keydown", (e) => {
+			if (e.isComposing) return;
+			if (e.key === "Enter" && !e.shiftKey) {
+				e.preventDefault();
+				textarea.blur(); // Commit the change
+			}
+		});
+		
+		if (this.focusLabelOnBuild) {
+			this.focusLabelOnBuild = false;
+			window.setTimeout(() => { 
+				textarea.focus(); 
+				textarea.select();
+			}, 0);
+		}
+		
+		return textarea;
+	}
+
+	/** Node hyperlink: a free-text target plus a note picker and an open button. */
+	private linkField(node: DiagramNode): void {
+		const field = this.panelEl.createDiv({ cls: "mermaid-flow-field" });
+		field.createEl("label", { text: "Link" });
+		const input = field.createEl("input", {
+			type: "text",
+			cls: "mermaid-flow-input",
+			attr: { placeholder: "[[Note]] or https://…" },
+		});
+		input.value = node.link ?? "";
+
+		const btnRow = field.createDiv({ cls: "mermaid-flow-link-buttons" });
+		// a2pdf: класс, чтобы спрятать — заметок Obsidian здесь нет
+		const pickBtn = btnRow.createEl("button", { text: "Pick note", cls: "mermaid-flow-panel-btn mermaid-flow-pick-note" });
+		const openBtn = btnRow.createEl("button", { text: "Open", cls: "mermaid-flow-panel-btn" });
+		openBtn.disabled = input.value.trim() === "";
+
+		input.addEventListener("input", () => {
+			const v = input.value.trim();
+			if (v) node.link = v;
+			else delete node.link;
+			openBtn.disabled = v === "";
+			this.ops.render();
+			this.ops.commit();
+		});
+
+		pickBtn.addEventListener("click", () => {
+			this.ops.pickLink()
+				.then((picked) => {
+					if (picked == null) return;
+					node.link = picked;
+					input.value = picked;
+					openBtn.disabled = false;
+					this.ops.render();
+					this.ops.commit();
+				})
+				.catch((e) => console.error("[mermaid-flow]", e));
+		});
+
+		openBtn.addEventListener("click", () => {
+			const v = input.value.trim();
+			if (v) this.ops.openLink(v);
+		});
+	}
+
+	private numberField(
+		label: string,
+		value: number | undefined,
+		onChange: (value: number | null) => void,
+	): void {
+		const field = this.panelEl.createDiv({ cls: "mermaid-flow-field" });
+		field.createEl("label", { text: label });
+		const input = field.createEl("input", { type: "number", cls: "mermaid-flow-input" });
+		input.placeholder = "auto";
+		input.min = "6";
+		if (value !== undefined) input.value = String(value);
+		input.addEventListener("input", () => {
+			const t = input.value.trim();
+			if (t === "") { onChange(null); return; }
+			const n = parseInt(t, 10);
+			if (!Number.isNaN(n)) onChange(n);
+		});
+	}
+
+	private colorField(
+		label: string,
+		value: string | undefined,
+		fallback: string,
+		onChange: (value: string) => void,
+	): void {
+		const field = this.panelEl.createDiv({ cls: "mermaid-flow-field-inline" });
+		field.createEl("label", { text: label });
+		const input = field.createEl("input", { type: "color" });
+		input.value = value ?? fallback;
+		input.addEventListener("input", () => onChange(input.value));
+	}
+
+	private selectField<T extends string>(
+		label: string,
+		options: T[],
+		labelFor: (value: T) => string,
+		current: T,
+		onChange: (value: T) => void,
+	): void {
+		const field = this.panelEl.createDiv({ cls: "mermaid-flow-field" });
+		field.createEl("label", { text: label });
+		const select = field.createEl("select", { cls: "dropdown mermaid-flow-input" });
+		for (const opt of options) {
+			const o = select.createEl("option", { text: labelFor(opt), value: opt });
+			if (opt === current) o.selected = true;
+		}
+		select.addEventListener("change", () => onChange(select.value as T));
+	}
+
+	private fontFamilyField(
+		current: string | undefined,
+		onChange: (value: string) => void,
+	): void {
+		const families: Array<{ label: string; value: string }> = [
+			{ label: "Default", value: "" },
+			{ label: "Sans-serif", value: "sans-serif" },
+			{ label: "Serif", value: "serif" },
+			{ label: "Monospace", value: "monospace" },
+			{ label: "Arial", value: "Arial" },
+			{ label: "Georgia", value: "Georgia" },
+			{ label: "Courier New", value: "'Courier New'" },
+			{ label: "Trebuchet MS", value: "'Trebuchet MS'" },
+			{ label: "Verdana", value: "Verdana" },
+		];
+		const field = this.panelEl.createDiv({ cls: "mermaid-flow-field" });
+		field.createEl("label", { text: "Font family" });
+		const select = field.createEl("select", { cls: "dropdown mermaid-flow-input" });
+		for (const f of families) {
+			const o = select.createEl("option", { text: f.label, value: f.value });
+			if ((current ?? "") === f.value) o.selected = true;
+		}
+		select.addEventListener("change", () => onChange(select.value));
+	}
+
+	private dangerButton(text: string, onClick: () => void): void {
+		const row = this.panelEl.createDiv({ cls: "mermaid-flow-panel-buttons" });
+		row.createEl("button", { text, cls: "mermaid-flow-panel-btn mod-warning" })
+			.addEventListener("click", onClick);
+	}
+
+	private ensureStyle(node: DiagramNode): NonNullable<DiagramNode["style"]> {
+		if (!node.style) node.style = {};
+		return node.style;
+	}
+
+	private afterStyleChange(node: DiagramNode): void {
+		if (!hasStyle(node.style)) node.style = undefined;
+		this.ops.render();
+		this.ops.commit();
+	}
+
+	private ensureEdgeStyle(edge: DiagramEdge): NonNullable<DiagramEdge["style"]> {
+		if (!edge.style) edge.style = {};
+		return edge.style;
+	}
+
+	private afterEdgeStyleChange(edge: DiagramEdge): void {
+		if (!hasEdgeStyle(edge.style)) edge.style = undefined;
+		this.ops.render();
+		this.ops.commit();
+	}
+}

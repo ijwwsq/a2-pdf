@@ -22,6 +22,8 @@
     style: dark
     photo: cover.jpg
     numbered: true
+    toc: auto
+    watermark: ЧЕРНОВИК
     meta:
       Роль: Python Backend
       Таймбокс: 4 часа
@@ -32,6 +34,7 @@
     <!--PART:Часть 2|Разбор для проверяющего-->   разделитель между частями
     <!--CAP:Пояснение под схемой-->               подпись к диаграмме
     <!--NUMBERING:off-->                          выключить нумерацию разделов
+    > [!NOTE] / [!TIP] / [!IMPORTANT] / [!WARNING] / [!CAUTION]   выноски
 """
 from __future__ import annotations
 
@@ -41,6 +44,7 @@ import mimetypes
 import os
 import html
 import json
+import math
 import pathlib
 import re
 import shutil
@@ -185,25 +189,38 @@ def split_front_matter(md: str) -> tuple[dict, str]:
     return meta, body.lstrip("\n")
 
 
+# ссылка без кавычек и угловых скобок: адрес уходит в атрибут href как есть
+LINK = re.compile(r"\[([^\]]+)\]\(((?:https?://|mailto:)[^\s)\"<>]+)\)")
+ITALIC = re.compile(r"(?<![\w*])\*(?!\s)([^*\n]+?)(?<!\s)\*(?![\w*])")
+
+
 def inline(text: str) -> str:
-    text = html.escape(text, quote=False)
-    text = re.sub(r"!\[[^\]]*\]\([^)]+\)", "", text)
-    text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1", text)
-    text = re.sub(r"`([^`]+)`", r"<code>\1</code>", text)
-    text = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", text)
-    return text
+    """Строчная разметка: `код`, **жирный**, *курсив* и ссылки. Внутри кода
+    разметка не действует, поэтому код разбираем отдельно."""
+    out = []
+    for i, part in enumerate(re.split(r"(`[^`]+`)", text)):
+        if i % 2:
+            out.append(f"<code>{html.escape(part[1:-1], quote=False)}</code>")
+            continue
+        part = html.escape(part, quote=False)
+        part = re.sub(r"!\[[^\]]*\]\([^)]+\)", "", part)
+        part = LINK.sub(r'<a href="\2">\1</a>', part)
+        part = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", part)
+        part = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", part)
+        out.append(ITALIC.sub(r"<em>\1</em>", part))
+    return "".join(out)
 
 
 MARKS = {"cap": re.compile(r"<!--CAP:(.+?)-->"),
          "numbering": re.compile(r"<!--NUMBERING:(on|off)-->"),
          "part": re.compile(r"<!--PART:([^|]+)\|([^-]+)-->")}
-HEADING = re.compile(r"^(#{1,4})\s+(.*)$")
+HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
 RULE = re.compile(r"^(-{3,}|\*{3,}|_{3,})$")
 BULLET = re.compile(r"^[-*+] ")
 NUMBER = re.compile(r"^\d+[.)] ")
 IMAGE = re.compile(r"^!\[[^\]]*\]\(([^)\s]+)\)$")
 SEPARATOR = re.compile(r":?-{2,}:?")
-BREAKS = re.compile(r"^(#{1,4} |```|\||[-*+] |\d+[.)] |> |<!--|-{3,}$)")
+BREAKS = re.compile(r"^(#{1,6} |```|\||[-*+] |\d+[.)] |> |<!--|-{3,}$)")
 
 
 def _read_fence(lines: list[str], i: int, keep_mermaid: bool
@@ -221,11 +238,21 @@ def _read_fence(lines: list[str], i: int, keep_mermaid: bool
     return [("code", lang, body)], i + 1
 
 
+CALLOUT = re.compile(r"^\[!(\w+)\]\s*(.*)$")
+# выноски GitHub: > [!NOTE] … — у каждой свой цвет и подпись
+CALLOUTS = {"note": "Примечание", "tip": "Совет", "important": "Важно",
+            "warning": "Внимание", "caution": "Осторожно"}
+
+
 def _read_quote(lines: list[str], i: int) -> tuple[list[tuple], int]:
     buf = []
     while i < len(lines) and lines[i].strip().startswith(">"):
         buf.append(lines[i].strip().lstrip(">").strip())
         i += 1
+    head = CALLOUT.match(buf[0]) if buf else None
+    if head and head.group(1).lower() in CALLOUTS:
+        text = " ".join([head.group(2)] + buf[1:]).strip()
+        return [("callout", head.group(1).lower(), text)], i
     return [("note", " ".join(buf))], i
 
 
@@ -314,7 +341,8 @@ def parse(md: str, keep_mermaid: bool = True) -> list[tuple]:
             found, i = [("image", IMAGE.match(stripped).group(1))], i + 1
         elif HEADING.match(stripped):
             head = HEADING.match(stripped)
-            found, i = [(f"h{len(head.group(1))}", head.group(2))], i + 1
+            # h5 и h6 набираем как h4: глубже документ не делим
+            found, i = [(f"h{min(len(head.group(1)), 4)}", head.group(2))], i + 1
         elif RULE.match(stripped):
             found, i = [("hr",)], i + 1
         else:
@@ -347,6 +375,43 @@ def _cell(text: str) -> str:
     if stripped and " " not in stripped and ATOMIC.match(stripped):
         return f'<span class="nb">{value}</span>'
     return value
+
+
+def code_tokens(lang: str, text: str) -> list[tuple[str, str]] | None:
+    """Код на известном языке — пары (роль, текст) для подсветки; иначе None.
+    Роли: kw, str, com, num, fn, type, op, meta. Общая для PDF и Word."""
+    if not lang:
+        return None
+    from pygments import lex
+    from pygments.lexers import get_lexer_by_name
+    from pygments.token import (Comment, Keyword, Name, Number, Operator,
+                                String)
+    from pygments.util import ClassNotFound
+    try:
+        lexer = get_lexer_by_name(lang.lower(), stripnl=False, ensurenl=False)
+    except ClassNotFound:
+        return None
+    roles = ((Comment, "com"), (String, "str"), (Number, "num"),
+             (Keyword.Type, "type"), (Keyword, "kw"),
+             (Name.Function, "fn"), (Name.Class, "type"),
+             (Name.Builtin, "type"), (Name.Decorator, "meta"),
+             (Name.Tag, "kw"), (Name.Attribute, "fn"), (Operator.Word, "kw"))
+    out = []
+    for token, value in lex(text, lexer):
+        role = next((r for t, r in roles if token in t), "")
+        if out and out[-1][0] == role:
+            out[-1] = (role, out[-1][1] + value)
+        else:
+            out.append((role, value))
+    return out
+
+
+def _code_html(lang: str, text: str) -> str:
+    tokens = code_tokens(lang, text)
+    if tokens is None:
+        return html.escape(text)
+    return "".join(f'<span class="t-{role}">{html.escape(value)}</span>'
+                   if role else html.escape(value) for role, value in tokens)
 
 
 def _table_class(columns: int) -> str:
@@ -389,7 +454,7 @@ def render(blocks: list[tuple], brand: brands.Brand, numbered: bool = True,
         elif kind == "ol":
             out.append("<ol>" + "".join(f"<li>{inline(x)}</li>" for x in b[1]) + "</ol>")
         elif kind == "code":
-            out.append(f'<pre class="code"><code>{html.escape(b[2])}</code></pre>')
+            out.append(f'<pre class="code"><code>{_code_html(b[1], b[2])}</code></pre>')
         elif kind == "mermaid":
             style = scheme_style(scheme, brand)
             source = html.escape(theme_diagram(b[1], brand, style))
@@ -398,6 +463,9 @@ def render(blocks: list[tuple], brand: brands.Brand, numbered: bool = True,
                        f"{source}</pre></div>")
         elif kind == "note":
             out.append(f'<div class="note"><p>{inline(b[1])}</p></div>')
+        elif kind == "callout":
+            out.append(f'<div class="note co-{b[1]}"><div class="co-lbl">'
+                       f'{CALLOUTS[b[1]]}</div><p>{inline(b[2])}</p></div>')
         elif kind == "table":
             head = "".join(f"<th>{inline(c)}</th>" for c in b[1])
             body = "".join("<tr>" + "".join(f"<td>{_cell(c)}</td>" for c in row)
@@ -500,6 +568,9 @@ h3{font-size:10.6pt;font-weight:600;color:var(--n900);margin:5mm 0 2mm;
 p{margin:0 0 3mm;orphans:2;widows:2}
 strong{color:var(--n900);font-weight:600}
 code,pre.code code{font-variant-ligatures:none;font-feature-settings:"liga" 0,"calt" 0}
+a{color:var(--accent-dark);text-decoration:none;
+  border-bottom:.2mm solid var(--accent-50)}
+em{font-style:italic}
 code{font-family:var(--mono);font-size:8.6pt;background:var(--brand-50);color:var(--brand);
      padding:.3mm 1.2mm;border-radius:.8mm;border:.2mm solid var(--brand-100)}
 ul,ol{margin:0 0 4mm;padding:0;list-style:none}
@@ -543,6 +614,28 @@ tbody tr:nth-child(even) td{background:var(--n50)}
 .note{border-left:.9mm solid var(--mark);background:var(--mark-50);padding:4mm 5.5mm;
       margin:0 0 4.5mm;border-radius:0 2mm 2mm 0;break-inside:avoid}
 .note p{margin:0;font-size:9.4pt}
+.co-lbl{font-family:var(--mono);font-size:7.2pt;font-weight:700;letter-spacing:1.3px;
+        text-transform:uppercase;margin-bottom:1.4mm;color:var(--co)}
+.note[class*=co-]{border-left-color:var(--co);background:var(--co-bg)}
+.co-note{--co:var(--accent-dark);--co-bg:var(--accent-50)}
+.co-tip{--co:var(--brand);--co-bg:var(--brand-50)}
+.co-important{--co:var(--mark-dark);--co-bg:var(--mark-50)}
+.co-warning{--co:var(--mark-dark);--co-bg:var(--mark-50)}
+.co-warning{border-left-width:1.6mm}
+.co-caution{--co:var(--danger);--co-bg:var(--danger-50)}
+/* подсветка кода в цветах бренда */
+.t-kw{color:var(--brand);font-weight:600}
+.t-type{color:var(--brand)}
+.t-fn,.t-meta{color:var(--accent-dark)}
+.t-str,.t-num{color:var(--mark-dark)}
+.t-com{color:var(--n400);font-style:italic}
+.toc h2{margin-bottom:8mm}
+.toc-row{display:flex;align-items:baseline;gap:3.5mm;padding:2.6mm 0;
+         border-bottom:.25mm solid var(--n100);font-size:10.4pt;color:var(--n900)}
+.toc-row .eyebrow{flex:none;width:7mm}
+.toc-row .ttl{flex:1}
+.toc-row .pg{flex:none;font-family:var(--mono);font-size:8.6pt;color:var(--n500)}
+.toc-sub{padding:1.4mm 0 1.4mm 10.5mm;font-size:9pt;color:var(--n500);border-bottom:0}
 .dg{border:.25mm solid var(--n200);border-radius:2mm;background:var(--n0);padding:6mm;
     margin:0 0 5mm;break-inside:avoid}
 .dg-mermaid{text-align:center;padding:4mm}
@@ -550,7 +643,7 @@ tbody tr:nth-child(even) td{background:var(--n50)}
 .dg.sch-soft{background:var(--n50)}
 .dg.sch-dark{background:var(--brand-dark);border-color:var(--brand-dark)}
 .dg.sch-clear{background:none;border:0}
-.dg-mermaid svg{max-width:100%;max-height:198mm;width:auto;height:auto}
+.dg-mermaid svg:not(svg svg){max-width:100%;max-height:198mm;width:auto;height:auto}
 .fig{margin:0 0 5mm;text-align:center;break-inside:avoid}
 .fig img{max-width:100%;max-height:150mm;border-radius:1.4mm}
 .fig-cap{margin:-3.5mm 0 5mm;text-align:center;font-size:8.4pt;font-style:italic;
@@ -620,8 +713,6 @@ BODY_TPL = """<!doctype html>
 """
 
 MM = 72 / 25.4
-NAVY = (0x0B / 255, 0x26 / 255, 0x60 / 255)
-BLUE = (0x1F / 255, 0xA8 / 255, 0xFC / 255)
 GRAY = (0x9C / 255, 0xA3 / 255, 0xAF / 255)
 LINE = (0xE1 / 255, 0xE4 / 255, 0xEA / 255)
 
@@ -646,8 +737,9 @@ def print_pdf(html_path: pathlib.Path, pdf_path: pathlib.Path, chrome: str,
              "--no-first-run", "--no-default-browser-check",
              f"--user-data-dir={profile}",
              "--no-pdf-header-footer", "--print-to-pdf-no-header",
+             "--generate-pdf-document-outline",
              f"--print-to-pdf={pdf_path}", f"--virtual-time-budget={wait_ms}",
-             "--allow-file-access-from-files", url],
+             url],
             check=True, capture_output=True, timeout=max(60, wait_ms // 1000 + 45))
         if not pdf_path.exists():
             raise RuntimeError("Chrome не создал PDF")
@@ -661,11 +753,16 @@ def _rgb(color: str) -> tuple[float, float, float]:
 
 
 def stamp(doc: pymupdf.Document, header_right: str, footer_left: str,
-          skip_first: bool, brand: brands.Brand | None = None) -> None:
-    """Рисует колонтитулы: логотип бренда, название и номера страниц."""
+          skip_first: bool, brand: brands.Brand | None = None,
+          watermark: str = "", fonts: brands.Fonts | None = None) -> None:
+    """Рисует колонтитулы: логотип бренда, название и номера страниц,
+    и водяной знак по диагонали, если он задан."""
     brand = brand or brands.get(None)
-    reg = pymupdf.Font(fontfile=str(ASSETS / "Inter-Regular.ttf"))
-    bold = pymupdf.Font(fontfile=str(ASSETS / "Inter-ExtraBold.ttf"))
+    fonts = fonts or brand.fonts
+    pick = lambda name, default: str(ASSETS / name) if (ASSETS / name).is_file() \
+        else str(ASSETS / default)
+    reg = pymupdf.Font(fontfile=pick(fonts.stamp_regular, "Inter-Regular.ttf"))
+    bold = pymupdf.Font(fontfile=pick(fonts.stamp_bold, "Inter-ExtraBold.ttf"))
     main = _rgb(brand.color("brand"))
     accent = _rgb(brand.color("accent"))
     total = doc.page_count
@@ -679,8 +776,10 @@ def stamp(doc: pymupdf.Document, header_right: str, footer_left: str,
         navy_tw, blue_tw, gray_tw = (pymupdf.TextWriter(page.rect) for _ in range(3))
         logo = LOGO_DIR / f"{brand.logo}-color.png"
         if logo.is_file():
-            page.insert_image(pymupdf.Rect(left, top_y - 6.6, left + 26.5,
-                                           top_y + 1.4),
+            # знак со слоганом (BeCloud) шире — масштаб как на обложке
+            scale = brand.logo_width_mm / brands.A2DATA.logo_width_mm
+            page.insert_image(pymupdf.Rect(left, top_y + 1.4 - 8 * scale,
+                                           left + 26.5 * scale, top_y + 1.4),
                               filename=str(logo), keep_proportion=True)
         else:
             navy_tw.append((left, top_y), brand.name, font=bold, fontsize=8)
@@ -700,6 +799,22 @@ def stamp(doc: pymupdf.Document, header_right: str, footer_left: str,
         navy_tw.write_text(page, color=main)
         blue_tw.write_text(page, color=accent)
         gray_tw.write_text(page, color=GRAY)
+        if watermark:
+            _watermark(page, watermark, bold, main)
+
+
+def _watermark(page, text: str, font: pymupdf.Font,
+               color: tuple[float, float, float]) -> None:
+    """Крупная надпись по диагонали страницы, едва заметная под текстом."""
+    w, h = page.rect.width, page.rect.height
+    size = min(96, 0.72 * (w * w + h * h) ** .5 / max(font.text_length(text, 1), 1))
+    center = pymupdf.Point(w / 2, h / 2)
+    writer = pymupdf.TextWriter(page.rect)
+    writer.append(center - (font.text_length(text, size) / 2, -size * .35),
+                  text, font=font, fontsize=size)
+    angle = math.degrees(math.atan2(h, w))
+    writer.write_text(page, color=color, opacity=.07, overlay=True,
+                      morph=(center, pymupdf.Matrix(angle)))   # снизу вверх
 
 
 def save(doc: pymupdf.Document, pdf_path: pathlib.Path) -> pathlib.Path:
@@ -833,11 +948,28 @@ def render_pdf(blocks: list[tuple], front: dict, out_path: pathlib.Path,
         cover_path.write_text(cover_html(front), encoding="utf-8")
         cover_pdf = TMP / f"{stem}-cover.pdf"
         print_pdf(cover_path, cover_pdf, chrome, 3000)
-        doc.insert_pdf(pymupdf.open(cover_pdf))
-    doc.insert_pdf(pymupdf.open(body_pdf))
+        # читаем в память: на Windows открытый файл не удалить при уборке
+        doc.insert_pdf(pymupdf.open("pdf", cover_pdf.read_bytes()))
+
+    body = pymupdf.open("pdf", body_pdf.read_bytes())
+    marks = locate_headings(body, headings(blocks, numbered))
+    before = doc.page_count                  # обложка
+    toc_pages = 0
+    if want_toc(front, marks):
+        head = (brands.tokens(brand, fonts) + BODY_CSS, fonts_css)
+        toc_doc = _toc_pdf(marks, before, head, chrome, TMP / f"{stem}-toc")
+        toc_pages = toc_doc.page_count
+        doc.insert_pdf(toc_doc)
+    doc.insert_pdf(body)
+    if toc_pages:
+        _toc_links(doc, toc_doc, marks, before)
+    if marks:   # закладки в боковой панели просмотрщика
+        doc.set_toc([[lvl, f"{num} {title}".strip(), page + before + toc_pages + 1]
+                     for lvl, num, title, page in marks])
 
     stamp(doc, str(front.get("header", front["title"])),
-          str(front.get("footer", "")), skip_first=with_cover, brand=brand)
+          str(front.get("footer", "")), skip_first=with_cover, brand=brand,
+          watermark=str(front.get("watermark") or "").strip(), fonts=fonts)
     doc.set_metadata({"title": str(front["title"]), "author": brand.name,
                       "subject": str(front.get("subtitle", "")),
                       "creator": brand.name})
@@ -847,6 +979,104 @@ def render_pdf(blocks: list[tuple], front: dict, out_path: pathlib.Path,
     for tmp in TMP.glob(f"{stem}-*"):  # промежуточные html/pdf не нужны
         tmp.unlink(missing_ok=True)
     return result
+
+
+def headings(blocks: list[tuple], numbered: bool = True
+             ) -> list[tuple[int, str, str]]:
+    """Разделы для оглавления: (уровень, номер, заголовок). Номера те же,
+    что render ставит над h2, включая выключение нумерации пометкой."""
+    out, n = [], 0
+    for b in blocks:
+        if b[0] == "numbering":
+            numbered = b[1]
+        elif b[0] == "h2":
+            n += 1
+            out.append((1, f"{n:02d}" if numbered else "", _plain(b[1])))
+        elif b[0] in ("h3", "h4"):
+            out.append((2, "", _plain(b[1])))
+    return out
+
+
+def _plain(text: str) -> str:
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", str(text))
+    return " ".join(re.sub(r"[*`]", "", text).split())
+
+
+def locate_headings(body: pymupdf.Document, found: list[tuple[int, str, str]]
+                    ) -> list[tuple[int, str, str, int]]:
+    """Страница каждого раздела (с нуля). Берём из оглавления, которое строит
+    Chrome; если его нет — ищем заголовок в тексте страниц по порядку."""
+    outline = [(_plain(title), page - 1) for _, title, page, *_ in body.get_toc()]
+    texts = [" ".join(page.get_text().split()) for page in body]
+    out, at, page = [], 0, 0
+    for lvl, num, title in found:
+        hit = next((i for i in range(at, len(outline)) if outline[i][0] == title), None)
+        if hit is not None:
+            at, page = hit + 1, outline[hit][1]
+        else:
+            page = next((i for i in range(page, len(texts)) if title in texts[i]), page)
+        out.append((lvl, num, title, page))
+    return out
+
+
+def want_toc(front: dict, marks: list) -> bool:
+    """Оглавление по умолчанию — когда разделов хотя бы три."""
+    value = str(front.get("toc", "auto")).lower()
+    if value in ("false", "0", "no", "off"):
+        return False
+    if value in ("true", "1", "yes", "on"):
+        return bool(marks)
+    return sum(1 for m in marks if m[0] == 1) >= 3
+
+
+def _toc_html(marks: list, offset: int, head: tuple[str, str]) -> str:
+    rows = "".join(
+        f'<div class="toc-row{"" if lvl == 1 else " toc-sub"}">'
+        + (f'<span class="eyebrow">{num}</span>' if lvl == 1 else "")
+        + f'<span class="ttl">{html.escape(title)}</span>'
+        f'<span class="pg">{page + offset + 1:02d}</span></div>'
+        for lvl, num, title, page in marks)
+    return BODY_TPL.format(title="Содержание", fonts=head[1], css=head[0],
+                           content='<div class="toc"><div class="h2-wrap">'
+                                   f'<h2>Содержание</h2></div>{rows}</div>',
+                           mermaid="")
+
+
+def _toc_pdf(marks: list, before: int, head: tuple[str, str], chrome: str,
+             stem: pathlib.Path) -> pymupdf.Document:
+    """Страницы оглавления. Номера зависят от того, сколько страниц займёт
+    само оглавление, поэтому при промахе с оценкой собираем второй раз."""
+    pages = 1
+    for _ in range(3):
+        src, pdf = stem.with_suffix(".html"), stem.with_suffix(".pdf")
+        src.write_text(_toc_html(marks, before + pages, head), encoding="utf-8")
+        print_pdf(src, pdf, chrome, 3000)
+        toc = pymupdf.open("pdf", pdf.read_bytes())   # файл удалит уборка
+        if toc.page_count == pages:
+            break
+        pages = toc.page_count
+    return toc
+
+
+def _toc_links(doc: pymupdf.Document, toc: pymupdf.Document, marks: list,
+               before: int) -> None:
+    """Строки оглавления кликабельны: ведут на страницу раздела."""
+    target_base = before + toc.page_count
+    idx, y = 0, -1.0
+    for lvl, num, title, page in marks:
+        # ищем по началу заголовка: длинный переносится на вторую строку
+        probe = " ".join(title.split()[:4])
+        for i in range(idx, toc.page_count):
+            hits = [r for r in toc[i].search_for(probe)
+                    if i > idx or r.y0 > y]
+            if not hits:
+                continue
+            idx, y = i, hits[0].y0
+            rect = pymupdf.Rect(17 * MM, hits[0].y0 - 3,
+                                toc[i].rect.width - 17 * MM, hits[0].y1 + 3)
+            doc[before + i].insert_link({"kind": pymupdf.LINK_GOTO, "from": rect,
+                                         "page": target_base + page})
+            break
 
 
 def diagram_html(sources: list[str], brand: brands.Brand, fonts: brands.Fonts,
@@ -870,7 +1100,7 @@ def diagram_html(sources: list[str], brand: brands.Brand, fonts: brands.Fonts,
             ".dg{border:0;margin:0;padding:6mm;width:100%;"
             f'{style["backdrop"]}'
             "}"
-            ".dg-mermaid svg{max-height:275mm}"
+            ".dg-mermaid svg:not(svg svg){max-height:275mm}"
             f"{scheme_css(style)}"
             f"</style></head><body>{body}"
             f"<script>{lib}</script>"
@@ -914,7 +1144,8 @@ def diagram_images(sources: list[str], front: dict, chrome: str | None = None,
         print_pdf(html_path, pdf_path, chrome, 15000)
         images = []
         with pymupdf.open(pdf_path) as doc:
-            for page in doc:
+            # за последней схемой Chrome может добавить пустой лист
+            for page in list(doc)[:len(sources)]:
                 pixmap = page.get_pixmap(dpi=dpi, clip=content_box(page),
                                          alpha=preset["clear"])
                 images.append((pixmap.tobytes("png"),
@@ -970,8 +1201,8 @@ def build(md_path: pathlib.Path, out_path: pathlib.Path | None = None,
     ensure_assets(quiet=quiet)
     out_path = out_path or md_path.with_suffix(".docx" if fmt == "docx" else ".pdf")
     result = build_markdown(
-        md_path.read_text(encoding="utf-8"), out_path, overrides=overrides,
-        append_texts=[p.read_text(encoding="utf-8") for p in (append or [])],
+        decode_text(md_path.read_bytes()), out_path, overrides=overrides,
+        append_texts=[decode_text(p.read_bytes()) for p in (append or [])],
         chrome=chrome, name=md_path.stem, fmt=fmt)
     if not quiet:
         _report(result)
@@ -1002,7 +1233,7 @@ def build_any(path: pathlib.Path, out_path: pathlib.Path | None = None,
     front.setdefault("title", path.stem)
     front.update({k: v for k, v in (overrides or {}).items() if v is not None})
     for extra in append or []:
-        extra_front, extra_md = split_front_matter(extra.read_text(encoding="utf-8"))
+        _, extra_md = split_front_matter(decode_text(extra.read_bytes()))
         blocks += parse(extra_md)
     result = render_document(blocks, front, out_path, fmt=fmt, chrome=chrome,
                              name=path.stem)
@@ -1046,6 +1277,10 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--no-cover", action="store_true", help="без обложки")
     ap.add_argument("--no-numbers", action="store_true",
                     help="не нумеровать разделы")
+    ap.add_argument("--toc", choices=("auto", "on", "off"),
+                    help="оглавление; по умолчанию — от трёх разделов")
+    ap.add_argument("--watermark", help="надпись по диагонали страниц, "
+                                        "например ЧЕРНОВИК")
     ap.add_argument("--append", action="append", default=[], type=pathlib.Path,
                     help="дописать в конец ещё один md")
     ap.add_argument("--brand", choices=sorted(brands.BRANDS),
@@ -1063,7 +1298,7 @@ def main(argv: list[str] | None = None) -> None:
 
     overrides: dict = {}
     for name in ("title", "subtitle", "kicker", "index", "footer", "header",
-                 "photo", "style", "brand", "font"):
+                 "photo", "style", "brand", "font", "toc", "watermark"):
         if getattr(args, name):
             overrides[name] = getattr(args, name)
     if args.confidential:
@@ -1087,7 +1322,7 @@ def main(argv: list[str] | None = None) -> None:
     for f in files:
         out = None
         if args.out:
-            out = args.out / f.with_suffix(".pdf").name if (
+            out = args.out / f.with_suffix("." + fmt).name if (
                 len(files) > 1 or args.out.is_dir()) else args.out
         build_any(f, out, overrides=overrides, append=args.append,
                   chrome=chrome, fmt=fmt)

@@ -13,6 +13,7 @@
     accent_50    светлая подложка акцента
     mark         редкий акцент-метка: штрих на обложке, выноски
     mark_50      подложка выноски
+    danger/_50   выноска «Осторожно» — единственный цвет вне фирменных
     ink          цвет основного текста
 """
 from __future__ import annotations
@@ -34,6 +35,9 @@ class Fonts:
     word_mono: str
     display_weight: int = 700
     display_tracking: str = "-.5px"
+    # чем печатать колонтитулы — файлы в assets; нет своего — Inter
+    stamp_regular: str = "Inter-Regular.ttf"
+    stamp_bold: str = "Inter-ExtraBold.ttf"
 
 
 @dataclass(frozen=True)
@@ -69,7 +73,8 @@ OSWALD = Fonts(
     query=("Oswald:wght@300;400;500;600"
            "&family=Roboto+Condensed:wght@300;400;700" + MONO_QUERY),
     word_body="Segoe UI", word_display="Bahnschrift", word_mono="Consolas",
-    display_weight=500, display_tracking="0px")
+    display_weight=500, display_tracking="0px",
+    stamp_regular="fonts/Oswald-Variable.ttf", stamp_bold="fonts/Oswald-SemiBold.ttf")
 
 MANROPE = Fonts(
     key="manrope", title="Manrope",
@@ -116,6 +121,7 @@ A2DATA = Brand(
         "accent_100": "#E1F2FF",
         "mark": "#FF9F1C", "mark_dark": "#B86A06", "mark_50": "#FFF8EC",
         "ink": "#111722", "muted": "#8FA6CE",
+        "danger": "#C8322A", "danger_50": "#FDF1F0",
     },
     neutrals=NEUTRALS_COOL,
     fonts=INTER,
@@ -136,6 +142,7 @@ BECLOUD = Brand(
         "accent_100": "#DCE3FF",
         "mark": "#8B3DFF", "mark_dark": "#6B22D6", "mark_50": "#F4EDFF",
         "ink": "#0F0F14", "muted": "#8A8FA3",
+        "danger": "#C8322A", "danger_50": "#FDF1F0",
     },
     neutrals=NEUTRALS_BECLOUD,
     # в Word фирменных шрифтов нет: Bahnschrift — ближайший узкий гротеск

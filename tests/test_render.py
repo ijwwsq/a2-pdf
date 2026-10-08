@@ -110,3 +110,60 @@ def test_docx_keeps_diagram_and_text(chrome, tmp_path):
     assert "Отчёт" in text
     with __import__("zipfile").ZipFile(out) as z:
         assert any(n.startswith("word/media/") for n in z.namelist())
+
+
+FEATURES = """---
+title: Проверка
+watermark: ЧЕРНОВИК
+---
+
+## Первый раздел
+
+> [!WARNING]
+> Осторожно с продом
+
+```python
+def f(x):
+    return "строка"  # комментарий
+```
+
+## Второй раздел
+
+Текст.
+
+### Подраздел
+
+## Третий раздел
+
+Ещё текст.
+"""
+
+
+def test_toc_bookmarks_watermark(chrome, tmp_path):
+    out = tmp_path / "features.pdf"
+    core.build_markdown(FEATURES, out, chrome=chrome)
+    with pymupdf.open(out) as doc:
+        toc_text = doc[1].get_text()
+        assert "Содержание" in toc_text and "Третий раздел" in toc_text
+        links = [l for l in doc[1].get_links() if l["kind"] == pymupdf.LINK_GOTO]
+        assert len(links) == 4                      # три раздела и подраздел
+        third = next(l for l in links if l["from"].y0 == max(x["from"].y0 for x in links))
+        assert "Третий раздел" in doc[third["page"]].get_text()
+        bookmarks = doc.get_toc()
+        assert [b[1] for b in bookmarks if b[0] == 1] == [
+            "01 Первый раздел", "02 Второй раздел", "03 Третий раздел"]
+        body = "".join(p.get_text() for p in doc)
+    # подпись выноски набрана капителью через CSS — в PDF она прописными
+    assert "внимание" in body.lower() and "черновик" in body.lower()
+
+
+def test_every_builder_template_renders(chrome, tmp_path):
+    """Все заготовки конструктора рисуются, а не падают в исходник."""
+    from a2pdf import diagrams
+    for key, t in diagrams.TEMPLATES.items():
+        out = tmp_path / f"{key}.pdf"
+        core.build_markdown(f"```mermaid\n{t['source']}\n```", out, chrome=chrome,
+                            overrides={"cover": "false"})
+        with pymupdf.open(out) as doc:
+            text = "".join(p.get_text() for p in doc)
+        assert t["source"].split()[0] not in text, key

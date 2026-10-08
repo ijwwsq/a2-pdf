@@ -1,0 +1,14 @@
+{
+  "name": "a2pdf-flow",
+  "private": true,
+  "description": "Конструктор схем a2pdf на основе obsidian-mermaid-flow",
+  "license": "GPL-3.0-or-later",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "@dagrejs/dagre": "^3.0.0",
+    "esbuild": "^0.28.0",
+    "lucide": "^1.52.0"
+  }
+}

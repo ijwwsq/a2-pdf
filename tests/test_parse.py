@@ -70,8 +70,9 @@ def test_front_matter_absent():
     assert body.startswith("# Раз")
 
 
-def test_inline_strips_links_and_images():
-    assert core.inline("[текст](http://x)") == "текст"
+def test_inline_links_clickable_images_stripped():
+    assert core.inline("[текст](http://x)") == '<a href="http://x">текст</a>'
+    assert core.inline("[текст](раздел.md)") == "текст"
     assert core.inline("![](pic.png)") == ""
     assert "<code>x</code>" in core.inline("`x`")
     assert "<strong>x</strong>" in core.inline("**x**")

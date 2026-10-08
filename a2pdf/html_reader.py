@@ -36,6 +36,7 @@ class HtmlBlocks(HTMLParser):
         self._row: list[str] | None = None
         self._table: list[list[str]] | None = None
         self._heading: str | None = None
+        self._links: list[str] = []      # адреса открытых <a>; "" — не ссылка
 
     def _take(self) -> str:
         raw = "".join(self._text)
@@ -55,6 +56,15 @@ class HtmlBlocks(HTMLParser):
         attrs = dict(attrs)
         if tag in INLINE:
             self._text.append(INLINE[tag][0])
+        elif tag == "a":
+            # ссылки переносим, если адрес полный: относительный без страницы
+            # не восстановить, а такие якоря и так ведут внутрь источника
+            href = (attrs.get("href") or "").strip()
+            ok = href.startswith(("http://", "https://", "mailto:")) and \
+                not re.search(r'[\s()"<>\[\]]', href)
+            self._links.append(href if ok else "")
+            if ok:
+                self._text.append("[")
         elif tag in HEADINGS:
             self._take()
             self._heading = HEADINGS[tag]
@@ -84,6 +94,10 @@ class HtmlBlocks(HTMLParser):
             return
         if tag in INLINE:
             self._text.append(INLINE[tag][1])
+        elif tag == "a":
+            href = self._links.pop() if self._links else ""
+            if href:
+                self._text.append(f"]({href})")
         elif tag in HEADINGS:
             self._emit(self._heading or "h2")
             self._heading = None

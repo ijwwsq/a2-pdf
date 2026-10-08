@@ -1,0 +1,542 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Конструктор схем</title>
+<link rel="stylesheet" id="fontcss" href="/fonts.css">
+<link rel="stylesheet" href="/static/flow/flow.css">
+<style>
+:root{
+  --brand:#0B2660; --brand-dark:#06173B; --brand-50:#F2F5FA; --brand-100:#E3EAF4;
+  --accent:#1FA8FC; --accent-dark:#1289D5; --accent-50:#F1F8FF;
+  --mark:#FF9F1C; --danger:#C8322A;
+  --n0:#FFFFFF; --n50:#F7F8FA; --n100:#EFF1F4; --n200:#E1E4EA;
+  --n400:#9CA3AF; --n500:#6B7280; --n700:#374151; --n900:#111722;
+  --font:'Inter','Segoe UI',Arial,sans-serif;
+  --mono:'JetBrains Mono',Consolas,monospace;
+  --r:8px; --sh:0 1px 2px color-mix(in srgb,var(--brand) 6%,transparent);
+  --sh-md:0 8px 24px color-mix(in srgb,var(--brand) 14%,transparent);
+}
+/* переменные Obsidian, которых ждёт редактор mermaid-flow, — из токенов бренда */
+body{
+  --background-primary:var(--n0); --background-primary-alt:var(--n50);
+  --background-secondary:var(--n50); --background-modifier-border:var(--n200);
+  --background-modifier-hover:var(--brand-50);
+  --interactive-accent:var(--brand); --interactive-accent-hover:var(--brand-dark);
+  --interactive-normal:var(--n0); --interactive-hover:var(--n100);
+  --text-normal:var(--n900); --text-muted:var(--n500); --text-faint:var(--n400);
+  --text-on-accent:#fff; --text-error:var(--danger);
+  --color-red:var(--danger); --color-red-rgb:200,50,42; --color-green:#2E9E5B;
+  --color-yellow:var(--mark);
+  --font-interface:var(--font); --font-text:var(--font); --font-monospace:var(--mono);
+  --font-ui-smaller:12px; --font-ui-small:13px; --font-ui-medium:14px; --font-ui-large:16px;
+  --font-medium:500; --font-semibold:600;
+  --size-2-2:4px; --size-4-2:8px; --size-4-3:12px; --size-4-4:16px; --size-4-6:24px;
+  --radius-s:6px; --radius-m:8px; --radius-l:12px; --shadow-s:var(--sh);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{font-family:var(--font);font-size:14px;line-height:1.5;color:var(--n700);
+     background:var(--n50);display:flex;flex-direction:column;overflow:hidden;
+     -webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit}
+
+header{background:var(--brand);color:#fff;padding:12px 24px;display:flex;align-items:center;
+       gap:28px;border-bottom:3px solid var(--mark);flex:none}
+header img{height:calc(16px * var(--logo-scale,1));display:block}
+nav{display:flex;gap:4px;flex:1}
+nav a{color:rgba(255,255,255,.7);text-decoration:none;font-weight:600;font-size:13px;
+      padding:6px 12px;border-radius:var(--r)}
+nav a:hover{color:#fff}
+nav a.on{color:#fff;background:rgba(255,255,255,.12)}
+.orgs{display:flex;gap:6px}
+.orgs button{display:flex;align-items:center;gap:6px;border:1px solid rgba(255,255,255,.25);
+  background:none;color:rgba(255,255,255,.75);font-weight:600;font-size:12px;padding:4px 10px;
+  border-radius:20px;cursor:pointer}
+.orgs button.on{border-color:#fff;color:#fff}
+.orgs .dot{width:8px;height:8px;border-radius:50%;box-shadow:0 0 0 1px rgba(255,255,255,.6)}
+
+/* ---------- верхняя панель ---------- */
+.bar{display:flex;align-items:center;gap:10px;padding:10px 24px;background:var(--n0);
+     border-bottom:1px solid var(--n200);flex:none;flex-wrap:wrap}
+.picker{position:relative}
+.picker > button{display:flex;align-items:center;gap:8px;border:1px solid var(--n200);
+  background:var(--n0);border-radius:var(--r);padding:7px 12px;cursor:pointer;font-weight:600;
+  color:var(--brand)}
+.picker > button:hover{border-color:var(--accent)}
+.picker > button small{font-weight:500;color:var(--n400);font-size:11px;letter-spacing:1px;
+  text-transform:uppercase}
+.picker > button::after{content:"▾";color:var(--n400)}
+.types{position:absolute;top:calc(100% + 6px);left:0;z-index:50;width:min(640px,92vw);
+  background:var(--n0);border:1px solid var(--n200);border-radius:12px;box-shadow:var(--sh-md);
+  padding:12px;max-height:70vh;overflow:auto}
+.types input{width:100%;border:1px solid var(--n200);border-radius:var(--r);padding:7px 10px;
+  margin-bottom:10px}
+.types input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-50)}
+.types .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.types h3{grid-column:1 / -1;font-size:10.5px;font-weight:600;letter-spacing:1.2px;
+  text-transform:uppercase;color:var(--n400);margin:6px 0 0}
+.types .grid button{border:1px solid var(--n200);background:var(--n0);border-radius:var(--r);
+  padding:7px 10px;text-align:left;cursor:pointer;font-weight:600;font-size:12.5px;
+  display:flex;justify-content:space-between;gap:6px}
+.types .grid button:hover{border-color:var(--accent)}
+.types .grid button.on{border-color:var(--brand);color:var(--brand);box-shadow:0 0 0 1px var(--brand)}
+.types .grid button i{font-style:normal;font-size:10px;color:var(--accent-dark);
+  background:var(--accent-50);border-radius:4px;padding:1px 5px;align-self:center}
+
+.seg{display:inline-flex;gap:2px;background:var(--n100);padding:3px;border-radius:var(--r)}
+.seg button{border:0;background:none;font-weight:600;font-size:12.5px;color:var(--n500);
+  padding:5px 12px;border-radius:6px;cursor:pointer}
+.seg button.on{background:var(--n0);color:var(--brand);box-shadow:var(--sh)}
+.schemes{display:flex;gap:6px;flex-wrap:wrap}
+.schemes button{display:flex;align-items:center;gap:7px;border:1px solid var(--n200);
+  background:var(--n0);font-weight:600;font-size:12px;color:var(--n500);padding:4px 10px 4px 5px;
+  border-radius:20px;cursor:pointer}
+.schemes button.on{border-color:var(--brand);color:var(--brand)}
+.schemes .sw{width:22px;height:16px;border-radius:4px;display:flex;align-items:center;
+  justify-content:center;border:1px solid var(--n200)}
+.schemes .sw i{width:9px;height:7px;border-radius:2px;display:block}
+.spacer{flex:1}
+.actions{display:flex;gap:6px}
+.actions button{font-weight:600;font-size:12.5px;border:1px solid var(--n200);background:var(--n0);
+  color:var(--n700);padding:6px 12px;border-radius:var(--r);cursor:pointer}
+.actions button:hover{border-color:var(--accent);color:var(--brand)}
+.actions button.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+
+/* ---------- рабочая область ---------- */
+.work{flex:1;min-height:0;display:grid;grid-template-columns:1fr minmax(320px,38%)}
+.work.solo{grid-template-columns:1fr}
+.editor{min-width:0;min-height:0;display:flex;flex-direction:column;background:var(--n0);
+  border-right:1px solid var(--n200)}
+#visual{flex:1;min-height:0;display:flex;flex-direction:column}
+#visual.a2-inline{padding:12px;overflow:auto}
+.a2-inline .mermaid-flow-footer{display:none}
+.a2-inline .mermaid-flow-alt-body{min-height:calc(100vh - 230px)}
+.codebox{flex:1;min-height:0;display:flex;flex-direction:column;padding:14px 16px;gap:8px}
+.snips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{border:1px solid var(--n200);background:var(--n0);border-radius:20px;padding:4px 10px;
+  font-size:12px;font-weight:600;cursor:pointer}
+.chip:hover{border-color:var(--accent)}
+.chip::before{content:"+ ";color:var(--accent-dark)}
+.chip.reset::before{content:"↺ "}
+textarea.code{flex:1;width:100%;font:12.5px/1.6 var(--mono);background:var(--n50);color:var(--n900);
+  border:1px solid var(--n200);border-radius:var(--r);padding:12px 14px;resize:none;tab-size:4}
+textarea.code:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-50)}
+.note{font-size:12px;color:var(--n500)}
+
+.preview{min-width:0;min-height:0;display:flex;flex-direction:column;background:var(--n50);
+  overflow:hidden}
+.preview .head{display:flex;align-items:center;justify-content:space-between;padding:8px 14px;
+  border-bottom:1px solid var(--n200);background:var(--n0)}
+.preview .head b{font-size:11px;letter-spacing:1.3px;text-transform:uppercase;color:var(--n400)}
+.preview .head button{border:0;background:none;color:var(--n500);cursor:pointer;font-size:12px;
+  font-weight:600}
+.stage{flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;padding:24px;
+  background:repeating-conic-gradient(var(--n100) 0 25%,var(--n0) 0 50%) 50%/16px 16px}
+.board{max-width:100%;transition:opacity .15s}
+.board.stale{opacity:.35}
+.board.dg-mermaid > svg{max-width:100%;height:auto;display:block;margin:0 auto}
+.err{margin:0 14px 10px;padding:10px 12px;border-radius:var(--r);background:#FDF1F0;
+  color:var(--danger);font:12px/1.5 var(--mono);white-space:pre-wrap;max-height:120px;overflow:auto}
+.status{font-size:12px;color:var(--n500);padding:6px 14px;min-height:28px}
+.show-preview{position:fixed;right:16px;bottom:16px;z-index:20;background:var(--brand);color:#fff;
+  border:0;border-radius:20px;padding:8px 14px;font-weight:600;box-shadow:var(--sh-md);cursor:pointer}
+
+/* ---------- окна, меню и уведомления вместо Obsidian ---------- */
+.modal-container{position:fixed;inset:0;z-index:100;display:flex;align-items:center;
+  justify-content:center}
+.modal-bg{position:absolute;inset:0;background:color-mix(in srgb,var(--brand-dark) 45%,transparent)}
+.modal{position:relative;background:var(--n0);border-radius:14px;box-shadow:var(--sh-md);
+  padding:20px;min-width:340px;max-width:94vw;max-height:90vh;display:flex;flex-direction:column;
+  overflow:auto}
+.modal-title{font-weight:700;color:var(--brand);font-size:16px;margin-bottom:12px;padding-right:28px}
+.modal-close-button{position:absolute;top:14px;right:14px;cursor:pointer;color:var(--n400);
+  width:20px;height:20px}
+.modal-close-button:hover{color:var(--n900)}
+.modal-close-button svg{width:20px;height:20px}
+.modal-content{display:flex;flex-direction:column;gap:8px}
+.menu{position:fixed;z-index:200;background:var(--n0);border:1px solid var(--n200);
+  border-radius:10px;box-shadow:var(--sh-md);padding:4px;min-width:200px;max-height:80vh;overflow:auto}
+.menu-item{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:6px;cursor:pointer;
+  font-size:13px;color:var(--n900)}
+.menu-item:hover{background:var(--brand-50);color:var(--brand)}
+.menu-item.is-disabled{opacity:.45;cursor:default}
+.menu-item.mod-warning{color:var(--danger)}
+.menu-item.mod-checked .menu-item-title::after{content:" ✓";color:var(--accent-dark)}
+.menu-item-icon{width:16px;height:16px;flex:none;color:var(--n500)}
+.menu-item-icon svg{width:16px;height:16px}
+.menu-separator{height:1px;background:var(--n100);margin:4px 2px}
+.notice-container{position:fixed;top:72px;right:20px;z-index:300;display:flex;flex-direction:column;
+  gap:8px}
+.notice{background:var(--brand);color:#fff;padding:10px 14px;border-radius:var(--r);
+  box-shadow:var(--sh-md);font-size:13px;max-width:360px;cursor:pointer}
+.clickable-icon{display:inline-flex;align-items:center;justify-content:center;cursor:pointer;
+  border-radius:6px;color:var(--n500)}
+.clickable-icon:hover{background:var(--n100);color:var(--n900)}
+.svg-icon{width:16px;height:16px}
+.mermaid-flow-editor button,.mermaid-flow-alt-editor button,.modal button{border:1px solid var(--n200);
+  background:var(--n0);border-radius:6px;padding:4px 10px;cursor:pointer}
+.mermaid-flow-editor button:hover,.mermaid-flow-alt-editor button:hover,.modal button:hover{
+  border-color:var(--accent)}
+button.mod-cta{background:var(--brand);border-color:var(--brand);color:#fff}
+.mermaid-flow-editor input,.mermaid-flow-editor select,.mermaid-flow-editor textarea,
+.mermaid-flow-alt-editor input,.mermaid-flow-alt-editor select,
+.modal input,.modal select,.modal textarea{border:1px solid var(--n200);border-radius:6px;
+  padding:4px 8px;background:var(--n0)}
+
+/* иконочные кнопки у редактора квадратные: отступы съедали иконку */
+.mermaid-flow-editor .mermaid-flow-icon-btn,.mermaid-flow-alt-editor .mermaid-flow-icon-btn{
+  padding:0;display:inline-flex;align-items:center;justify-content:center;gap:2px}
+.mermaid-flow-editor button .svg-icon,.mermaid-flow-alt-editor button .svg-icon{
+  width:16px;height:16px;flex:none}
+/* подписи холста — шрифтом бренда, как в документе */
+.mermaid-flow-node-label,.mermaid-flow-edge-label,.mermaid-flow-alt-svg text{font-family:var(--font)}
+/* тема схемы — только из брендбука; сохранение автоматическое */
+.mermaid-flow-theme-group,.mermaid-flow-actions,.mermaid-flow-pick-note{display:none!important}
+.mermaid-flow-editor.is-actions-docked .mermaid-flow-toolbar{padding-right:8px}
+
+@media (max-width:1080px){
+  .work{grid-template-columns:1fr;grid-template-rows:1fr 45vh}
+  header{flex-wrap:wrap;gap:12px;padding:10px 16px}
+  .bar{padding:10px 16px}
+}
+</style>
+<!-- токены бренда приходят с сервера и идут после основного стиля, чтобы
+     перекрыть значения по умолчанию: страница перекрашивается вместе со схемой -->
+<style id="tokens"></style>
+<style id="dgcss"></style>
+</head>
+<body>
+<header>
+  <img id="logo" src="/logo/a2data-white" alt="">
+  <nav><a href="/">Документы</a><a href="/builder" class="on">Конструктор схем</a></nav>
+  <div class="orgs" id="orgs"></div>
+</header>
+
+<div class="bar">
+  <div class="picker">
+    <button type="button" id="pick"><small>Тип</small><span id="pick-name">Блок-схема</span></button>
+    <div class="types" id="types" hidden>
+      <input id="find" placeholder="Найти: ганта, архитектура, sankey…" autocomplete="off">
+      <div class="grid" id="grid"></div>
+    </div>
+  </div>
+  <div class="seg" id="views">
+    <button type="button" data-view="visual" class="on">Визуально</button>
+    <button type="button" data-view="code">Код</button>
+  </div>
+  <div class="schemes" id="schemes"></div>
+  <div class="spacer"></div>
+  <div class="actions">
+    <button type="button" id="copy" title="Скопировать код схемы">Код</button>
+    <button type="button" id="svg">SVG</button>
+    <button type="button" id="png">PNG</button>
+    <button type="button" id="todoc" class="primary">В документ</button>
+  </div>
+</div>
+
+<div class="work" id="work">
+  <div class="editor">
+    <div id="visual"></div>
+    <div class="codebox" id="codebox" hidden>
+      <div class="snips" id="snips"></div>
+      <textarea class="code" id="code" spellcheck="false"></textarea>
+      <div class="note" id="code-note"></div>
+    </div>
+  </div>
+  <div class="preview" id="preview">
+    <div class="head"><b>Как будет в документе</b>
+      <button type="button" id="hide-preview">Скрыть ›</button></div>
+    <div class="stage"><div class="board dg-mermaid" id="board"></div></div>
+    <div class="err" id="err" hidden></div>
+    <div class="status" id="status"></div>
+  </div>
+</div>
+<button type="button" class="show-preview" id="show-preview" hidden>‹ Превью</button>
+
+<script src="/mermaid.js"></script>
+<script src="/mermaid-fix.js"></script>
+<script src="/static/flow/flow.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, c =>
+  ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'})[c]);
+// у этих типов есть визуальный редактор, остальные правятся кодом
+const VISUAL = {flowchart: 'холст', sequence: 'визуально', mindmap: 'визуально', er: 'визуально'};
+
+let TEMPLATES = [], SCHEMES = [], ORGS = [];
+let org = localStorage.getItem('a2pdf-brand') || 'a2data';
+let S = {type: 'flowchart', view: 'visual', scheme: 'outline', preview: true, code: {}};
+try { Object.assign(S, JSON.parse(localStorage.getItem('a2pdf-flow') || '{}')); } catch (e) {}
+let mounted = null;
+
+function save() {
+  try { localStorage.setItem('a2pdf-flow', JSON.stringify(S)); } catch (e) {}
+}
+const tpl = (key) => TEMPLATES.find(t => t.key === key) || {snippets: [], source: ''};
+const code = () => S.code[S.type] ?? tpl(S.type).source;
+
+/* ---------- выбор типа ---------- */
+function drawTypes() {
+  const needle = $('find').value.trim().toLowerCase();
+  let group = '';
+  $('grid').innerHTML = TEMPLATES.filter(t => !needle ||
+      (t.title + ' ' + t.key + ' ' + t.group).toLowerCase().includes(needle))
+    .map(t => {
+      const head = t.group !== group ? `<h3>${esc(group = t.group)}</h3>` : '';
+      const badge = VISUAL[t.key] ? `<i>${VISUAL[t.key]}</i>` : '';
+      return head + `<button type="button" data-type="${t.key}"
+        class="${t.key === S.type ? 'on' : ''}">${esc(t.title)}${badge}</button>`;
+    }).join('') || '<span class="note">Ничего не нашлось</span>';
+  $('grid').querySelectorAll('[data-type]').forEach(b => b.addEventListener('click', () => {
+    $('types').hidden = true;
+    setType(b.dataset.type);
+  }));
+}
+$('pick').addEventListener('click', () => {
+  $('types').hidden = !$('types').hidden;
+  if (!$('types').hidden) { $('find').value = ''; drawTypes(); $('find').focus(); }
+});
+$('find').addEventListener('input', drawTypes);
+document.addEventListener('mousedown', ev => {
+  if (!ev.target.closest('.picker')) $('types').hidden = true;
+});
+
+function setType(key) {
+  S.type = key;
+  S.view = VISUAL[key] ? 'visual' : 'code';
+  save();
+  layout();
+  redraw();
+}
+
+/* ---------- редактор: визуальный или код ---------- */
+function layout() {
+  $('pick-name').textContent = tpl(S.type).title || S.type;
+  $('views').hidden = !VISUAL[S.type];
+  $('views').querySelectorAll('button').forEach(b =>
+    b.classList.toggle('on', b.dataset.view === S.view));
+  if (mounted) { mounted.destroy(); mounted = null; }
+  $('visual').innerHTML = '';
+  $('visual').className = '';
+  const visual = S.view === 'visual' && VISUAL[S.type];
+  $('visual').hidden = !visual;
+  $('codebox').hidden = !!visual;
+  if (visual) {
+    mounted = A2Flow.mount($('visual'), code(), (c) => {
+      S.code[S.type] = c; save(); redraw();
+    });
+    if (!mounted) { S.view = 'code'; return layout(); }
+  } else {
+    drawCode();
+  }
+}
+
+function drawCode() {
+  const t = tpl(S.type);
+  $('code').value = code();
+  $('code-note').textContent = VISUAL[S.type]
+    ? 'Правки кода откроются и в визуальном редакторе.'
+    : 'Свои цвета в classDef и style заменяются палитрой шаблона.';
+  $('snips').innerHTML = t.snippets.map((s, i) =>
+    `<button type="button" class="chip" data-s="${i}">${esc(s.label)}</button>`).join('') +
+    '<button type="button" class="chip reset" data-reset>Заново</button>';
+  $('snips').querySelectorAll('[data-s]').forEach(b => b.addEventListener('click', () =>
+    insert(t.snippets[+b.dataset.s].text)));
+  $('snips').querySelector('[data-reset]').addEventListener('click', () => {
+    if (!confirm('Вернуть стартовую схему? Текущий код пропадёт.')) return;
+    delete S.code[S.type]; save(); drawCode(); redraw();
+  });
+}
+
+function insert(text) {
+  const box = $('code'), at = box.selectionEnd || box.value.length;
+  const lineEnd = box.value.indexOf('\n', at);
+  const pos = lineEnd === -1 ? box.value.length : lineEnd;
+  box.value = box.value.slice(0, pos) + '\n' + text + box.value.slice(pos);
+  box.focus();
+  box.selectionStart = box.selectionEnd = pos + 1 + text.length;
+  S.code[S.type] = box.value; save(); redraw();
+}
+$('code').addEventListener('input', () => { S.code[S.type] = $('code').value; save(); redraw(); });
+$('code').addEventListener('keydown', ev => {
+  if (ev.key !== 'Tab') return;
+  ev.preventDefault();
+  ev.target.setRangeText('    ', ev.target.selectionStart, ev.target.selectionEnd, 'end');
+  S.code[S.type] = ev.target.value; save(); redraw();
+});
+$('views').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+  if (b.dataset.view === S.view) return;
+  S.view = b.dataset.view; save(); layout();
+}));
+
+/* ---------- превью в цветах бренда ---------- */
+let timer = null, seq = 0, themeKey = '';
+function redraw() { clearTimeout(timer); timer = setTimeout(draw, 250); }
+
+async function draw() {
+  const my = ++seq, src = code();
+  try {
+    const res = await fetch('/diagram/theme', {method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({source: src, brand: org, scheme: S.scheme})});
+    if (res.status === 401) { location = '/login'; return; }
+    if (!res.ok) throw new Error('Сервер ответил ' + res.status);
+    const data = await res.json();
+    if (my !== seq) return;
+    $('tokens').textContent = data.tokens;
+    $('dgcss').textContent = data.css;
+    $('board').setAttribute('style', data.backdrop);
+    const key = data.brand + '/' + data.scheme;
+    if (key !== themeKey) {
+      themeKey = key;
+      A2Flow.setPalette(data.palette);
+      mermaid.initialize(data.config);
+      const body = (data.config.themeVariables.fontFamily || '').split(',')[0];
+      await Promise.all(['400 13px ' + body, '600 13px ' + body]
+        .map(f => document.fonts.load(f).catch(() => {})));
+    }
+    const {svg} = await mermaid.render('dg' + my, data.source);
+    if (my !== seq) return;
+    $('board').innerHTML = svg;
+    const drawn = $('board').querySelector('svg');
+    if (drawn) a2pdfFix(drawn, data.source, data.series);
+    $('board').classList.remove('stale');
+    $('err').hidden = true;
+  } catch (e) {
+    if (my !== seq) return;
+    // mermaid оставляет в body свою картинку с ошибкой — она не нужна
+    document.querySelectorAll('[id^="ddg"]').forEach(x => x.remove());
+    $('board').classList.add('stale');
+    $('err').hidden = false;
+    $('err').textContent = String(e.message || e).split('\n').slice(0, 4).join('\n');
+  }
+}
+
+function showPreview(on) {
+  S.preview = on; save();
+  $('work').classList.toggle('solo', !on);
+  $('preview').hidden = !on;
+  $('show-preview').hidden = on;
+}
+$('hide-preview').addEventListener('click', () => showPreview(false));
+$('show-preview').addEventListener('click', () => showPreview(true));
+
+/* ---------- бренд и шаблон оформления ---------- */
+function drawSchemes() {
+  $('schemes').innerHTML = SCHEMES.map(s => {
+    const p = s.preview || {};
+    const bg = p.bg ? `background:${p.bg}`
+      : 'background:repeating-conic-gradient(#ddd 0 25%,#fff 0 50%) 50%/6px 6px';
+    return `<button type="button" data-sch="${s.key}" class="${s.key === S.scheme ? 'on' : ''}"
+      title="${esc(s.note)}"><span class="sw" style="${bg}"><i style="background:${p.fill};
+      border:1px solid ${p.stroke}"></i></span>${esc(s.title)}</button>`;
+  }).join('');
+  $('schemes').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+    S.scheme = b.dataset.sch; save(); drawSchemes(); redraw();
+  }));
+}
+
+async function selectOrg(key) {
+  org = key;
+  try { localStorage.setItem('a2pdf-brand', key); } catch (e) {}
+  $('orgs').querySelectorAll('button').forEach(b =>
+    b.classList.toggle('on', b.dataset.org === key));
+  const brand = ORGS.find(b => b.key === key) || {};
+  document.documentElement.style.setProperty('--logo-scale', brand.logo_scale || 1);
+  $('logo').src = `/logo/${key}-white`;
+  $('fontcss').href = '/fonts.css?brand=' + encodeURIComponent(key);
+  fetch('/schemes?brand=' + encodeURIComponent(key)).then(r => r.json())
+    .then(d => { SCHEMES = d.schemes || []; drawSchemes(); }).catch(() => {});
+  // холст красится при отрисовке из CSS-переменных — сначала токены бренда,
+  // потом заново собираем редактор
+  clearTimeout(timer);
+  await draw();
+  await document.fonts.ready;
+  layout();
+}
+
+/* ---------- выгрузка ---------- */
+function status(text) { $('status').textContent = text; }
+function download(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement('a'), {href: url, download: name});
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+const fileName = () => tpl(S.type).title || 'схема';
+
+$('copy').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(code()); status('Код скопирован'); }
+  catch (e) { status('Буфер обмена недоступен — откройте вкладку «Код»'); }
+});
+
+$('svg').addEventListener('click', () => {
+  const svg = $('board').querySelector('svg');
+  if (!svg) return;
+  const copy = svg.cloneNode(true);
+  // правила шаблона в документе привязаны к обёртке .dg-mermaid — в файле её нет
+  const style = document.createElementNS('http://www.w3.org/2000/svg', 'style');
+  style.textContent = $('dgcss').textContent.replace(/\.dg-mermaid /g, '');
+  copy.insertBefore(style, copy.firstChild);
+  const bg = (SCHEMES.find(s => s.key === S.scheme) || {preview: {}}).preview.bg;
+  if (bg) {
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    Object.entries({x: '-50%', y: '-50%', width: '200%', height: '200%', fill: bg})
+      .forEach(([k, v]) => rect.setAttribute(k, v));
+    copy.insertBefore(rect, style.nextSibling);
+  }
+  download(new Blob([new XMLSerializer().serializeToString(copy)],
+                    {type: 'image/svg+xml'}), fileName() + '.svg');
+});
+
+// PNG собирает сервер — тем же путём, что схемы в документе
+$('png').addEventListener('click', async () => {
+  const body = new FormData();
+  body.append('text', '```mermaid\n' + code() + '\n```');
+  body.append('format', 'png'); body.append('brand', org);
+  body.append('scheme', S.scheme); body.append('title', fileName());
+  status('Собираю картинку…');
+  try {
+    const res = await fetch('/convert', {method: 'POST', body});
+    if (!res.ok) {
+      let msg = 'Ошибка ' + res.status;
+      try { msg = (await res.json()).detail || msg; } catch (e) {}
+      throw new Error(msg);
+    }
+    download(await res.blob(), fileName() + '.png');
+    status('Готово');
+  } catch (e) { status(e.message); }
+});
+
+// схема уходит в форму документа блоком ```mermaid
+$('todoc').addEventListener('click', () => {
+  try {
+    localStorage.setItem('a2pdf-handoff', JSON.stringify(
+      {text: '```mermaid\n' + code() + '\n```', scheme: S.scheme}));
+  } catch (e) { status('Не удалось передать схему: хранилище браузера недоступно'); return; }
+  location = '/';
+});
+
+/* ---------- старт ---------- */
+Promise.all([
+  fetch('/diagram/templates').then(r => r.json()),
+  fetch('/brands').then(r => r.json())
+]).then(([t, b]) => {
+  TEMPLATES = t.templates || [];
+  ORGS = b.brands || [];
+  if (!TEMPLATES.some(x => x.key === S.type)) S.type = 'flowchart';
+  $('orgs').innerHTML = ORGS.map(x =>
+    `<button type="button" data-org="${x.key}"><span class="dot"
+      style="background:${x.colors.brand}"></span>${esc(x.name)}</button>`).join('');
+  $('orgs').querySelectorAll('button').forEach(x =>
+    x.addEventListener('click', () => selectOrg(x.dataset.org)));
+  if (!ORGS.some(x => x.key === org)) org = b.default || 'a2data';
+  showPreview(S.preview !== false);
+  selectOrg(org);
+}).catch(() => status('Не удалось загрузить конструктор'));
+</script>
+</body>
+</html>

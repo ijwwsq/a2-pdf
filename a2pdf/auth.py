@@ -131,7 +131,11 @@ def attempt_allowed(client: str) -> bool:
 
 
 def note_failure(client: str) -> None:
-    _attempts.setdefault(client, deque()).append(time.monotonic())
+    now = time.monotonic()
+    _attempts.setdefault(client, deque()).append(now)
+    if len(_attempts) > 5000:   # подбор с тысяч адресов не должен съесть память
+        for key in [k for k, v in _attempts.items() if now - v[-1] > ATTEMPT_WINDOW]:
+            _attempts.pop(key, None)
 
 
 def reset_attempts(client: str) -> None:

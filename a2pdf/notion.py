@@ -85,7 +85,9 @@ def _rich_v3(title: list | None) -> str:
             continue
         for fmt in (part[1] if len(part) > 1 and part[1] else []):
             kind = fmt[0]
-            if kind == "b":
+            if kind == "a" and len(fmt) > 1 and str(fmt[1]).startswith(("http", "mailto:")):
+                text = f"[{text}]({fmt[1]})"
+            elif kind == "b":
                 text = f"**{text}**"
             elif kind == "i":
                 text = f"*{text}*"
@@ -108,6 +110,9 @@ def _rich_v1(items: list | None) -> str:
             text = f"**{text}**"
         if ann.get("italic"):
             text = f"*{text}*"
+        href = item.get("href") or ""
+        if href.startswith(("http", "mailto:")):
+            text = f"[{text}]({href})"
         out.append(text)
     return "".join(out).strip()
 

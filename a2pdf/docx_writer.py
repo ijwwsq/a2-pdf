@@ -21,7 +21,7 @@ from docx import Document
 from docx.enum.section import WD_SECTION
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.oxml import OxmlElement
+from docx.oxml import OxmlElement, parse_xml
 from docx.oxml.ns import qn
 from docx.shared import Cm, Emu, Pt, RGBColor
 
@@ -60,6 +60,17 @@ class Theme:
         self.hex_line = brand.neutrals["n200"].lstrip("#")
         self.hex_soft = brand.neutrals["n50"].lstrip("#")
         self.hex_mark_bg = brand.color("mark_50").lstrip("#")
+        # выноски > [!NOTE] и подсветка кода — те же роли, что в PDF
+        self.callouts = {
+            "note": (brand.color("accent_dark"), brand.color("accent_50")),
+            "tip": (brand.color("brand"), brand.color("brand_50")),
+            "important": (brand.color("mark_dark"), brand.color("mark_50")),
+            "warning": (brand.color("mark_dark"), brand.color("mark_50")),
+            "caution": (brand.color("danger"), brand.color("danger_50"))}
+        self.code = {"kw": self.main, "type": self.main,
+                     "fn": self.accent_dark, "meta": self.accent_dark,
+                     "str": _rgb(brand.color("mark_dark")),
+                     "num": _rgb(brand.color("mark_dark")), "com": self.light}
         self.fonts = fonts
         self.font = fonts.word_body
         self.display = fonts.word_display
@@ -142,7 +153,9 @@ def _spacing(paragraph, before: float = 0, after: float = 0,
         fmt.line_spacing = line
 
 
-INLINE_RE = re.compile(r"(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)")
+INLINE_RE = re.compile(r"(`[^`]+`|!\[[^\]]*\]\([^)]+\)|\[[^\]]+\]\([^)]+\)"
+                       r"|\*\*[^*]+\*\*|\*[^*]+\*)")
+LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 
 
 def _style_run(run, size: float, color: RGBColor, name: str) -> None:
@@ -157,11 +170,15 @@ def _style_run(run, size: float, color: RGBColor, name: str) -> None:
 def _runs(paragraph, theme: "Theme", text: str, size: float = 10.5,
           color: RGBColor | None = None, bold: bool = False,
           font: str | None = None) -> None:
-    """Разбирает **жирный**, *курсив* и `код` в отдельные run-ы."""
+    """Разбирает **жирный**, *курсив*, `код` и ссылки в отдельные run-ы."""
     color = color or theme.ink
     font = font or theme.font
     for part in INLINE_RE.split(str(text)):
-        if not part:
+        if not part or part.startswith("!["):     # картинка внутри строки
+            continue
+        link = LINK_RE.fullmatch(part)
+        if link:
+            _hyperlink(paragraph, theme, link.group(1), link.group(2), size, font)
             continue
         run = paragraph.add_run()
         if part.startswith("**") and part.endswith("**"):
@@ -180,6 +197,23 @@ def _runs(paragraph, theme: "Theme", text: str, size: float = 10.5,
             _style_run(run, size, color, font)
         if bold:
             run.bold = True
+
+
+def _hyperlink(paragraph, theme: "Theme", text: str, url: str, size: float,
+               font: str) -> None:
+    """Ссылка Word; адреса кроме http(s) и почты остаются просто текстом."""
+    run = paragraph.add_run()
+    _style_run(run, size, theme.accent_dark, font)
+    run.text = text
+    if not re.match(r"(https?://|mailto:)", url):
+        return
+    rel = paragraph.part.relate_to(
+        url, "http://schemas.openxmlformats.org/officeDocument/2006/relationships/"
+             "hyperlink", is_external=True)
+    link = OxmlElement("w:hyperlink")
+    link.set(qn("r:id"), rel)
+    run._r.addprevious(link)
+    link.append(run._r)
 
 
 def _plain(text: str) -> str:
@@ -411,6 +445,45 @@ def _runners(document: Document, theme: "Theme", front: dict) -> None:
     _field(right, theme, "NUMPAGES", color=theme.light)
 
 
+def _toc(document: Document, theme: "Theme") -> None:
+    """Оглавление полем Word: номера страниц считает сам Word при открытии."""
+    title = document.add_paragraph()     # не заголовок: иначе попадёт в само оглавление
+    _spacing(title, after=10)
+    _runs(title, theme, "Содержание", size=16, color=theme.main, bold=True,
+          font=theme.display)
+    _field(document.add_paragraph(), theme, 'TOC \\o "1-3" \\h \\z',
+           size=10.5, color=theme.ink)
+    document.add_page_break()
+    # Word обновит поле сам и спросит разрешения — иначе оглавление пустое
+    update = OxmlElement("w:updateFields")
+    update.set(qn("w:val"), "true")
+    document.settings.element.append(update)
+
+
+def _watermark(header, theme: "Theme", text: str) -> None:
+    """Водяной знак Word — фигура WordArt в колонтитуле, за текстом."""
+    shape = (
+        '<w:r xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+        ' xmlns:v="urn:schemas-microsoft-com:vml"'
+        ' xmlns:o="urn:schemas-microsoft-com:office:office"><w:pict>'
+        '<v:shapetype id="_x0000_t136" coordsize="21600,21600" o:spt="136"'
+        ' adj="10800" path="m@7,l@8,m@5,21600l@6,21600e">'
+        '<v:path textpathok="t" o:connecttype="custom"/>'
+        '<v:textpath on="t" fitshape="t"/>'
+        '<o:lock v:ext="edit" text="t" shapetype="t"/></v:shapetype>'
+        '<v:shape id="A2pdfWatermark" o:spid="_x0000_s2049" type="#_x0000_t136"'
+        ' style="position:absolute;margin-left:0;margin-top:0;width:460pt;'
+        'height:100pt;rotation:315;z-index:-251657216;'
+        'mso-position-horizontal:center;mso-position-horizontal-relative:margin;'
+        'mso-position-vertical:center;mso-position-vertical-relative:margin"'
+        f' o:allowincell="f" fillcolor="#{theme.hex_main}" stroked="f">'
+        '<v:fill opacity=".08"/>'
+        f'<v:textpath style="font-family:&quot;{theme.display}&quot;;'
+        f'font-size:1pt;font-weight:bold" string="{html_mod.escape(text)}"/>'
+        '</v:shape></w:pict></w:r>')
+    header.paragraphs[0]._p.append(parse_xml(shape))
+
+
 class _Body:
     """Набор содержимого: куда пишем, чем оформляем и что уже израсходовали."""
 
@@ -460,14 +533,26 @@ class _Body:
         self._ul(block, style="List Number")
 
     def _code(self, block: tuple) -> None:
-        for line in str(block[2]).split("\n"):
+        tokens = core.code_tokens(block[1], str(block[2])) or [("", str(block[2]))]
+        lines: list[list[tuple[str, str]]] = [[]]
+        for role, value in tokens:          # токены режем по строкам
+            for k, piece in enumerate(value.split("\n")):
+                if k:
+                    lines.append([])
+                if piece:
+                    lines[-1].append((role, piece))
+        for parts in lines:
             paragraph = self.doc.add_paragraph()
             _spacing(paragraph, after=0, line=1.15)
             paragraph.paragraph_format.left_indent = Cm(0.5)
             _shade(paragraph._p.get_or_add_pPr(), self.theme.hex_soft)
             _borders(paragraph, left=(self.theme.hex_accent, 18))
-            run = paragraph.add_run(line or " ")
-            _style_run(run, 8.5, self.theme.ink, self.theme.mono)
+            for role, piece in parts or [("", " ")]:
+                run = paragraph.add_run(piece)
+                _style_run(run, 8.5, self.theme.code.get(role, self.theme.ink),
+                           self.theme.mono)
+                run.bold = role == "kw"
+                run.italic = role == "com"
         self.doc.add_paragraph()
 
     def _note(self, block: tuple) -> None:
@@ -477,6 +562,40 @@ class _Body:
         _shade(paragraph._p.get_or_add_pPr(), self.theme.hex_mark_bg)
         _borders(paragraph, left=(self.theme.hex_mark, 18))
         _runs(paragraph, self.theme, block[1], size=10)
+
+    def _callout(self, block: tuple) -> None:
+        color, background = self.theme.callouts[block[1]]
+        label = self.doc.add_paragraph()
+        _spacing(label, before=4, after=0)
+        label.paragraph_format.left_indent = Cm(0.5)
+        label.paragraph_format.keep_with_next = True
+        _shade(label._p.get_or_add_pPr(), background.lstrip("#"))
+        _borders(label, left=(color.lstrip("#"), 18))
+        run = label.add_run(core.CALLOUTS[block[1]].upper())
+        run.bold = True
+        _style_run(run, 7.5, _rgb(color), self.theme.mono)
+        paragraph = self.doc.add_paragraph()
+        _spacing(paragraph, before=0, after=8, line=1.25)
+        paragraph.paragraph_format.left_indent = Cm(0.5)
+        _shade(paragraph._p.get_or_add_pPr(), background.lstrip("#"))
+        _borders(paragraph, left=(color.lstrip("#"), 18))
+        _runs(paragraph, self.theme, block[2], size=10)
+
+    def _numbering(self, block: tuple) -> None:
+        self.numbered = block[1]
+
+    def _part(self, block: tuple) -> None:
+        """Разделитель частей: метка и заголовок над линией цвета бренда."""
+        paragraph = self.doc.add_paragraph()
+        _spacing(paragraph, before=18, after=8)
+        paragraph.paragraph_format.keep_with_next = True
+        _borders(paragraph, top=(self.theme.hex_main, 12))
+        label = paragraph.add_run(_plain(block[1]).upper() + "   ")
+        label.bold = True
+        _style_run(label, 8, self.theme.mark, self.theme.mono)
+        title = paragraph.add_run(_plain(block[2]))
+        title.bold = True
+        _style_run(title, 13, self.theme.main, self.theme.display)
 
     def _cap(self, block: tuple) -> None:
         paragraph = self.doc.add_paragraph()
@@ -564,6 +683,12 @@ def write_docx(blocks: list[tuple], front: dict, out_path: pathlib.Path,
     section.bottom_margin = Cm(2.2)
     section.left_margin = section.right_margin = Cm(2.2)
     _runners(document, theme, front)
+    watermark = str(front.get("watermark") or "").strip()
+    if watermark:
+        _watermark(document.sections[-1].header, theme, watermark)
+    marks = core.headings(blocks)
+    if core.want_toc(front, [(lvl, n, t, 0) for lvl, n, t in marks]):
+        _toc(document, theme)
 
     body = _Body(
         document, theme,

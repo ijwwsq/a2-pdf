@@ -93,7 +93,11 @@ def test_preview_colors_present(key):
 def test_mermaid_init_is_valid_json_theme():
     brand = brands.get("becloud")
     js = core.mermaid_init(brand, brand.fonts, core.scheme_style("dark", brand))
-    assert "themeVariables:" in js
+    import json
+    import re
+    config = json.loads(re.search(r"mermaid\.initialize\((\{.*?\})\);\n", js).group(1))
+    assert config["themeVariables"]["primaryColor"]
+    assert "a2pdfFix" in js
     assert "mermaid.run({querySelector: '.mermaid', suppressErrors: true})" in js
 
 

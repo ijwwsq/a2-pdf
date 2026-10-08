@@ -1,0 +1,528 @@
+/*
+ * The internal diagram model. This is the single source of truth the visual
+ * editor manipulates. It is converted to/from Mermaid text by parser.ts and
+ * serializer.ts.
+ */
+
+export type Direction = "TB" | "BT" | "LR" | "RL";
+
+export const DIRECTIONS: Direction[] = ["TB", "BT", "LR", "RL"];
+
+export const DIRECTION_LABELS: Record<Direction, string> = {
+	TB: "Top to bottom",
+	BT: "Bottom to top",
+	LR: "Left to right",
+	RL: "Right to left",
+};
+
+export type NodeShape =
+	| "rect"
+	| "round"
+	| "stadium"
+	| "subroutine"
+	| "cylinder"
+	| "circle"
+	| "double-circle"
+	| "diamond"
+	| "hexagon"
+	| "parallelogram"
+	| "parallelogram-alt"
+	| "trapezoid"
+	| "trapezoid-alt"
+	| "asymmetric";
+
+export const NODE_SHAPES: NodeShape[] = [
+	"rect",
+	"round",
+	"stadium",
+	"subroutine",
+	"cylinder",
+	"circle",
+	"double-circle",
+	"diamond",
+	"hexagon",
+	"parallelogram",
+	"parallelogram-alt",
+	"trapezoid",
+	"trapezoid-alt",
+	"asymmetric",
+];
+
+export const SHAPE_LABELS: Record<NodeShape, string> = {
+	rect: "Rectangle",
+	round: "Rounded",
+	stadium: "Stadium",
+	subroutine: "Subroutine",
+	cylinder: "Cylinder / database",
+	circle: "Circle",
+	"double-circle": "Double circle",
+	diamond: "Decision",
+	hexagon: "Hexagon",
+	parallelogram: "Parallelogram",
+	"parallelogram-alt": "Parallelogram (alt)",
+	trapezoid: "Trapezoid",
+	"trapezoid-alt": "Trapezoid (alt)",
+	asymmetric: "Asymmetric",
+};
+
+export type EdgeKind =
+	| "arrow"
+	| "open"
+	| "dotted"
+	| "thick"
+	| "bidirectional"
+	| "invisible";
+
+export const EDGE_KINDS: EdgeKind[] = [
+	"arrow",
+	"open",
+	"dotted",
+	"thick",
+	"bidirectional",
+	"invisible",
+];
+
+export const EDGE_LABELS: Record<EdgeKind, string> = {
+	arrow: "Arrow",
+	open: "Open line",
+	dotted: "Dotted",
+	thick: "Thick",
+	bidirectional: "Bidirectional",
+	invisible: "Invisible",
+};
+
+export interface NodeStyle {
+	fillColor?: string;
+	strokeColor?: string;
+	textColor?: string;
+	fontSize?: number;
+	fontFamily?: string;
+	/** Any style props we don't model explicitly, kept verbatim (e.g. stroke-width). */
+	extra?: string[];
+}
+
+export interface EdgeStyle {
+	strokeColor?: string;
+	strokeWidth?: number;
+	textColor?: string;
+	fontSize?: number;
+	extra?: string[];
+}
+
+/** A Mermaid classDef: a named, reusable node style (`classDef hot fill:#f96`). */
+export interface ClassDef {
+	name: string;
+	/** Unknown props are preserved verbatim in style.extra for round-trip. */
+	style: NodeStyle;
+}
+
+export interface DiagramNode {
+	id: string;
+	label: string;
+	shape: NodeShape;
+	x: number;
+	y: number;
+	/** Manual size overrides (editor hint; auto-sized from the label when unset). */
+	w?: number;
+	h?: number;
+	style?: NodeStyle;
+	/** classDef names assigned via `class A name` / `A:::name` — order matters. */
+	classes?: string[];
+	/** When true the node cannot be dragged on the canvas. */
+	locked?: boolean;
+	/** Optional hyperlink target: an Obsidian link (`[[Note#Heading]]`) or an
+	 *  external URL. Persisted as a Mermaid `click <id> "<target>"` line. */
+	link?: string;
+	/** Comments directly preceding this node declaration. */
+	comments?: string[];
+}
+
+/** A Mermaid `subgraph` — a labelled container grouping member nodes.
+ *  Optional `parentId` nests this group inside another (nested subgraphs). */
+export interface DiagramGroup {
+	id: string;
+	title: string;
+	nodeIds: string[];
+	/** When set, this subgraph is nested inside the group with that id. */
+	parentId?: string;
+	/** Subgraph-specific layout direction (e.g. `direction LR`). */
+	direction?: Direction;
+	/** Subgraph style applied via `style <groupId> ...`. */
+	style?: NodeStyle;
+	/** classDef names assigned to the subgraph via `class <groupId> name`. */
+	classes?: string[];
+	/** Comments or unrecognized lines preserved inside this subgraph's scope. */
+	extras?: string[];
+	/** Comments directly preceding this subgraph declaration. */
+	comments?: string[];
+}
+
+/** Diagram-level Mermaid config, emitted as a `%%{init: …}%%` directive. */
+export interface DiagramConfig {
+	theme?: string;
+	/** Diagram background colour; undefined = transparent. Emitted as themeVariables.background. */
+	background?: string;
+	themeVariables?: Record<string, string>;
+	nodeSpacing?: number;
+	rankSpacing?: number;
+}
+
+export function hasConfig(cfg: DiagramConfig | undefined): boolean {
+	if (!cfg) return false;
+	return (
+		cfg.theme !== undefined ||
+		cfg.background !== undefined ||
+		cfg.nodeSpacing !== undefined ||
+		cfg.rankSpacing !== undefined ||
+		(cfg.themeVariables !== undefined &&
+			Object.keys(cfg.themeVariables).length > 0)
+	);
+}
+
+export function hasStyle(style: NodeStyle | undefined): boolean {
+	if (!style) return false;
+	return (
+		style.fillColor !== undefined ||
+		style.strokeColor !== undefined ||
+		style.textColor !== undefined ||
+		style.fontSize !== undefined ||
+		style.fontFamily !== undefined ||
+		(style.extra !== undefined && style.extra.length > 0)
+	);
+}
+
+export function hasEdgeStyle(style: EdgeStyle | undefined): boolean {
+	if (!style) return false;
+	return (
+		style.strokeColor !== undefined ||
+		style.strokeWidth !== undefined ||
+		style.textColor !== undefined ||
+		style.fontSize !== undefined ||
+		(style.extra !== undefined && style.extra.length > 0)
+	);
+}
+
+export interface DiagramEdge {
+	id: string;
+	from: string;
+	to: string;
+	label: string;
+	kind: EdgeKind;
+	style?: EdgeStyle;
+	/** Show a marching-ants CSS animation on the edge line. */
+	animated?: boolean;
+	/** Comments directly preceding this edge statement. */
+	comments?: string[];
+}
+
+export interface DiagramModel {
+	direction: Direction;
+	nodes: DiagramNode[];
+	edges: DiagramEdge[];
+	groups: DiagramGroup[];
+	config: DiagramConfig;
+	/** Named reusable styles (`classDef`), in declaration order. */
+	classDefs: ClassDef[];
+	/**
+	 * Lines from the original Mermaid source that we do not understand
+	 * (click bindings, malformed directives, ...). We round-trip these
+	 * untouched so the visual editor never destroys advanced syntax.
+	 */
+	extras: string[];
+	/**
+	 * Mermaid v10.5+ YAML frontmatter (`---` … `---`), including both fences,
+	 * verbatim. It is only valid at the very top of a diagram, so it cannot go
+	 * through `extras` (which is re-emitted at the end); the serializer writes
+	 * it back first, before any other line.
+	 */
+	frontmatter?: string[];
+	/** Diagram accessibility title (`accTitle: ...`). */
+	accTitle?: string;
+	/** Diagram accessibility description (`accDescr: ...` or `accDescr { ... }`). */
+	accDescr?: string;
+	/** Comments directly following the diagram header before any nodes/edges. */
+	headerComments?: string[];
+}
+
+export function emptyModel(direction: Direction = "TB"): DiagramModel {
+	return {
+		direction,
+		nodes: [],
+		edges: [],
+		groups: [],
+		config: {},
+		classDefs: [],
+		extras: [],
+	};
+}
+
+/**
+ * Effective render style for a node. Per-property merge, lowest to highest
+ * precedence: theme CSS defaults (returned undefined keeps them) <
+ * `classDef default` < the node's classes in assignment order (later class
+ * wins per property) < the node's explicit `style` (style line / panel edits).
+ * `extra` props are round-trip-only and never merged.
+ */
+export function resolveNodeStyle(
+	model: DiagramModel,
+	node: DiagramNode,
+): NodeStyle | undefined {
+	const byName = new Map(model.classDefs.map((c) => [c.name, c.style]));
+	const layers: Array<NodeStyle | undefined> = [byName.get("default")];
+	for (const name of node.classes ?? []) layers.push(byName.get(name));
+	layers.push(node.style);
+
+	const merged: NodeStyle = {};
+	for (const layer of layers) {
+		if (!layer) continue;
+		if (layer.fillColor !== undefined) merged.fillColor = layer.fillColor;
+		if (layer.strokeColor !== undefined) merged.strokeColor = layer.strokeColor;
+		if (layer.textColor !== undefined) merged.textColor = layer.textColor;
+		if (layer.fontSize !== undefined) merged.fontSize = layer.fontSize;
+		if (layer.fontFamily !== undefined) merged.fontFamily = layer.fontFamily;
+	}
+	return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
+export function findNode(
+	model: DiagramModel,
+	id: string,
+): DiagramNode | undefined {
+	return model.nodes.find((n) => n.id === id);
+}
+
+/** Generate a node id that does not collide with existing nodes. */
+export function nextNodeId(model: DiagramModel): string {
+	const used = new Set(model.nodes.map((n) => n.id));
+	// Try single uppercase letters first (A, B, C, ...), then N1, N2, ...
+	for (let i = 0; i < 26; i++) {
+		const id = String.fromCharCode(65 + i);
+		if (!used.has(id)) return id;
+	}
+	let n = 1;
+	while (used.has(`N${n}`)) n++;
+	return `N${n}`;
+}
+
+let edgeCounter = 0;
+export function newEdgeId(): string {
+	edgeCounter += 1;
+	return `e${edgeCounter}-${Date.now().toString(36)}`;
+}
+
+export function removeNode(model: DiagramModel, id: string): void {
+	model.nodes = model.nodes.filter((n) => n.id !== id);
+	model.edges = model.edges.filter((e) => e.from !== id && e.to !== id);
+	for (const g of model.groups) {
+		g.nodeIds = g.nodeIds.filter((nid) => nid !== id);
+	}
+}
+
+let groupCounter = 0;
+export function newGroupId(model: DiagramModel): string {
+	const used = new Set(model.groups.map((g) => g.id));
+	let n = ++groupCounter;
+	while (used.has(`sub${n}`)) n++;
+	groupCounter = n;
+	return `sub${n}`;
+}
+
+export function groupOf(
+	model: DiagramModel,
+	nodeId: string,
+): DiagramGroup | undefined {
+	return model.groups.find((g) => g.nodeIds.includes(nodeId));
+}
+
+/** Move a node into `groupId`, or remove it from any group when null. */
+export function assignNodeToGroup(
+	model: DiagramModel,
+	nodeId: string,
+	groupId: string | null,
+): void {
+	for (const g of model.groups) {
+		g.nodeIds = g.nodeIds.filter((id) => id !== nodeId);
+	}
+	if (groupId) {
+		const g = model.groups.find((gr) => gr.id === groupId);
+		if (g && !g.nodeIds.includes(nodeId)) g.nodeIds.push(nodeId);
+	}
+}
+
+/** Delete a group but keep its member nodes (ungroup). Nested children are
+ *  re-parented to this group's former parent (or become roots). */
+export function removeGroup(model: DiagramModel, groupId: string): void {
+	const removed = model.groups.find((g) => g.id === groupId);
+	const newParent = removed?.parentId;
+	for (const g of model.groups) {
+		if (g.parentId !== groupId) continue;
+		if (newParent) g.parentId = newParent;
+		else delete g.parentId;
+	}
+	model.groups = model.groups.filter((g) => g.id !== groupId);
+}
+
+/** Direct child groups of `parentId` (or root groups when parentId is null). */
+export function childGroups(
+	model: DiagramModel,
+	parentId: string | null,
+): DiagramGroup[] {
+	return model.groups.filter((g) =>
+		parentId === null ? !g.parentId : g.parentId === parentId,
+	);
+}
+
+/** All node ids owned by this group or any nested descendant group. */
+export function descendantNodeIds(
+	model: DiagramModel,
+	groupId: string,
+): string[] {
+	const ids: string[] = [];
+	const visit = (id: string) => {
+		const g = model.groups.find((x) => x.id === id);
+		if (!g) return;
+		ids.push(...g.nodeIds);
+		for (const child of model.groups) {
+			if (child.parentId === id) visit(child.id);
+		}
+	};
+	visit(groupId);
+	return ids;
+}
+
+/** True if the group (or any nested child) still owns at least one node. */
+export function groupSubtreeHasNodes(
+	model: DiagramModel,
+	groupId: string,
+): boolean {
+	return descendantNodeIds(model, groupId).length > 0;
+}
+
+/**
+ * Check if `potentialParentId` can be a parent of `childId` without creating
+ * a cycle. Returns false if:
+ * - potentialParentId is the same as childId (self-reference)
+ * - potentialParentId is a descendant of childId (would create a cycle)
+ */
+export function canBeParentOf(
+	model: DiagramModel,
+	potentialParentId: string | null,
+	childId: string,
+): boolean {
+	if (potentialParentId === null) return true; // Root is always valid
+	if (potentialParentId === childId) return false; // Can't be parent of itself
+	
+	// Check if potentialParentId is a descendant of childId
+	const visited = new Set<string>();
+	const isDescendant = (targetId: string, currentRootId: string): boolean => {
+		if (visited.has(currentRootId)) return false; // Cycle protection
+		visited.add(currentRootId);
+		
+		for (const child of model.groups) {
+			if (child.parentId === currentRootId) {
+				if (child.id === targetId) return true;
+				if (isDescendant(targetId, child.id)) return true;
+			}
+		}
+		return false;
+	};
+	
+	return !isDescendant(potentialParentId, childId);
+}
+
+export function removeEdge(model: DiagramModel, id: string): void {
+	model.edges = model.edges.filter((e) => e.id !== id);
+}
+
+/** Copy a node (label + shape) to a new id offset slightly. Returns new id. */
+export function duplicateNode(
+	model: DiagramModel,
+	id: string,
+): string | null {
+	const src = findNode(model, id);
+	if (!src) return null;
+	const newId = nextNodeId(model);
+	model.nodes.push({
+		id: newId,
+		label: src.label,
+		shape: src.shape,
+		x: src.x + 40,
+		y: src.y + 40,
+		w: src.w,
+		h: src.h,
+		style: src.style ? { ...src.style, extra: src.style.extra ? [...src.style.extra] : undefined } : undefined,
+		classes: src.classes ? [...src.classes] : undefined,
+		link: src.link,
+	});
+	const group = model.groups.find((g) => g.nodeIds.includes(id));
+	if (group && !group.nodeIds.includes(newId)) {
+		group.nodeIds.push(newId);
+	}
+	return newId;
+}
+
+/** Move a node to the end of the nodes array (rendered on top). */
+export function bringToFront(model: DiagramModel, id: string): void {
+	const idx = model.nodes.findIndex((n) => n.id === id);
+	if (idx < 0 || idx === model.nodes.length - 1) return;
+	const [node] = model.nodes.splice(idx, 1);
+	if (node) model.nodes.push(node);
+}
+
+/** Move a node to the start of the nodes array (rendered at back). */
+export function sendToBack(model: DiagramModel, id: string): void {
+	const idx = model.nodes.findIndex((n) => n.id === id);
+	if (idx <= 0) return;
+	const [node] = model.nodes.splice(idx, 1);
+	if (node) model.nodes.unshift(node);
+}
+
+/** Deep clone so the editor can discard changes on cancel. */
+export function cloneModel(model: DiagramModel): DiagramModel {
+	return {
+		direction: model.direction,
+		nodes: model.nodes.map((n) => ({
+			...n,
+			comments: n.comments ? [...n.comments] : undefined,
+			style: n.style
+				? { ...n.style, extra: n.style.extra ? [...n.style.extra] : undefined }
+				: undefined,
+			classes: n.classes ? [...n.classes] : undefined,
+		})),
+		edges: model.edges.map((e) => ({
+			...e,
+			animated: e.animated,
+			comments: e.comments ? [...e.comments] : undefined,
+			style: e.style
+				? { ...e.style, extra: e.style.extra ? [...e.style.extra] : undefined }
+				: undefined,
+		})),
+		groups: model.groups.map((g) => ({
+			...g,
+			nodeIds: [...g.nodeIds],
+			parentId: g.parentId,
+			direction: g.direction,
+			comments: g.comments ? [...g.comments] : undefined,
+			style: g.style
+				? { ...g.style, extra: g.style.extra ? [...g.style.extra] : undefined }
+				: undefined,
+			classes: g.classes ? [...g.classes] : undefined,
+			extras: g.extras ? [...g.extras] : undefined,
+		})),
+		classDefs: model.classDefs.map((c) => ({
+			name: c.name,
+			style: { ...c.style, extra: c.style.extra ? [...c.style.extra] : undefined },
+		})),
+		config: {
+			...model.config,
+			themeVariables: model.config.themeVariables
+				? { ...model.config.themeVariables }
+				: undefined,
+		},
+		extras: [...model.extras],
+		frontmatter: model.frontmatter ? [...model.frontmatter] : undefined,
+		accTitle: model.accTitle,
+		accDescr: model.accDescr,
+		headerComments: model.headerComments ? [...model.headerComments] : undefined,
+	};
+}

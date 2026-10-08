@@ -1,0 +1,84 @@
+/*
+ * Popup (Modal) host for the visual editor.
+ */
+
+import { App, Modal } from "obsidian";
+import type { LibraryComponent } from "./componentLibrary";
+import { AiHostBridge, DiagramEditorUI } from "./editorUI";
+import { DiagramModel, NodeShape } from "./model";
+
+export class MermaidEditorModal extends Modal {
+	private model: DiagramModel;
+	private onSave: (model: DiagramModel) => void;
+	private toolbarStyle: "native" | "floating";
+	private exportFolder: string;
+	private snapSize: number;
+	private defaultShape: NodeShape;
+	private ai?: AiHostBridge;
+	private getComponentLibrary?: () => LibraryComponent[];
+	private saveComponentLibrary?: (lib: LibraryComponent[]) => Promise<void> | void;
+	private collapsePropertySections: boolean;
+	private autoResizeCanvas: boolean;
+	private panelStyle: "sidebar" | "floating";
+	private ui: DiagramEditorUI | null = null;
+
+	constructor(
+		app: App,
+		model: DiagramModel,
+		onSave: (model: DiagramModel) => void,
+		toolbarStyle: "native" | "floating" = "native",
+		exportFolder = "mermaid flow",
+		snapSize = 0,
+		ai?: AiHostBridge,
+		getComponentLibrary?: () => LibraryComponent[],
+		saveComponentLibrary?: (lib: LibraryComponent[]) => Promise<void> | void,
+		defaultShape: NodeShape = "rect",
+		collapsePropertySections = false,
+		autoResizeCanvas = true,
+		panelStyle: "sidebar" | "floating" = "sidebar",
+	) {
+		super(app);
+		this.model = model;
+		this.onSave = onSave;
+		this.toolbarStyle = toolbarStyle;
+		this.exportFolder = exportFolder;
+		this.snapSize = snapSize;
+		this.ai = ai;
+		this.getComponentLibrary = getComponentLibrary;
+		this.saveComponentLibrary = saveComponentLibrary;
+		this.defaultShape = defaultShape;
+		this.collapsePropertySections = collapsePropertySections;
+		this.autoResizeCanvas = autoResizeCanvas;
+		this.panelStyle = panelStyle;
+	}
+
+	onOpen(): void {
+		this.modalEl.addClass("mermaid-flow-modal");
+		this.titleEl.setText("Visual Mermaid Editor");
+		// Same docked "Discard" / "Save" toolbar buttons as the embedded pane
+		// (omitting actionsSlot keeps the toolbar off title-bar icon mode).
+		// The native close X stays — Esc and the X both act as Discard.
+		this.ui = new DiagramEditorUI(this.app, this.contentEl, this.model, {
+			persist: (m) => this.onSave(m),
+			close: () => this.close(),
+			closeOnSave: true,
+			toolbarStyle: this.toolbarStyle,
+			exportFolder: this.exportFolder,
+			snapSize: this.snapSize,
+			defaultShape: this.defaultShape,
+			collapsePropertySections: this.collapsePropertySections,
+			autoResizeCanvas: this.autoResizeCanvas,
+			panelStyle: this.panelStyle,
+			ai: this.ai,
+			getComponentLibrary: this.getComponentLibrary,
+			saveComponentLibrary: this.saveComponentLibrary,
+		});
+		this.ui.build();
+	}
+
+	onClose(): void {
+		this.ui?.destroy();
+		this.ui = null;
+		this.contentEl.empty();
+	}
+}

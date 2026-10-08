@@ -1,0 +1,120 @@
+/*
+ * Embedded (ItemView) host for the visual editor. Lives in a workspace pane
+ * beside the note instead of as a popup.
+ */
+
+import { ItemView, WorkspaceLeaf } from "obsidian";
+import type { LibraryComponent } from "./componentLibrary";
+import { AiHostBridge, DiagramEditorUI } from "./editorUI";
+import { DiagramModel, NodeShape } from "./model";
+
+export const VIEW_TYPE_MERMAID_FLOW = "mermaid-flow-editor-view";
+
+export class MermaidEditorView extends ItemView {
+	private ui: DiagramEditorUI | null = null;
+	private model: DiagramModel | null = null;
+	private onSave: ((model: DiagramModel) => void) | null = null;
+	private autoSave = false;
+	private toolbarStyle: "native" | "floating" = "native";
+	private exportFolder = "mermaid flow";
+	private snapSize = 0;
+	private defaultShape: NodeShape = "rect";
+	private ai?: AiHostBridge;
+	private getComponentLibrary?: () => LibraryComponent[];
+	private saveComponentLibrary?: (lib: LibraryComponent[]) => Promise<void> | void;
+	private collapsePropertySections = false;
+	private autoResizeCanvas = true;
+	private panelStyle: "sidebar" | "floating" = "sidebar";
+
+	constructor(leaf: WorkspaceLeaf) {
+		super(leaf);
+	}
+
+	getViewType(): string {
+		return VIEW_TYPE_MERMAID_FLOW;
+	}
+
+	getDisplayText(): string {
+		return "Mermaid Flow Editor";
+	}
+
+	getIcon(): string {
+		return "workflow";
+	}
+
+	/** Populate the pane with a diagram and a save handler, then render. */
+	setData(
+		model: DiagramModel,
+		onSave: (model: DiagramModel) => void,
+		autoSave = false,
+		toolbarStyle: "native" | "floating" = "native",
+		exportFolder = "mermaid flow",
+		snapSize = 0,
+		ai?: AiHostBridge,
+		getComponentLibrary?: () => LibraryComponent[],
+		saveComponentLibrary?: (lib: LibraryComponent[]) => Promise<void> | void,
+		defaultShape: NodeShape = "rect",
+		collapsePropertySections = false,
+		autoResizeCanvas = true,
+		panelStyle: "sidebar" | "floating" = "sidebar",
+	): void {
+		this.model = model;
+		this.onSave = onSave;
+		this.autoSave = autoSave;
+		this.toolbarStyle = toolbarStyle;
+		this.exportFolder = exportFolder;
+		this.snapSize = snapSize;
+		this.ai = ai;
+		this.getComponentLibrary = getComponentLibrary;
+		this.saveComponentLibrary = saveComponentLibrary;
+		this.defaultShape = defaultShape;
+		this.collapsePropertySections = collapsePropertySections;
+		this.autoResizeCanvas = autoResizeCanvas;
+		this.panelStyle = panelStyle;
+		this.rebuild();
+	}
+
+	async onOpen(): Promise<void> {
+		this.rebuild();
+	}
+
+	async onClose(): Promise<void> {
+		this.ui?.destroy();
+		this.ui = null;
+	}
+
+	private rebuild(): void {
+		this.ui?.destroy();
+		this.ui = null;
+
+		const container = this.contentEl;
+		container.empty();
+		container.addClass("mermaid-flow-view");
+
+		if (!this.model) {
+			container.createDiv({
+				cls: "mermaid-flow-empty",
+				text: "No diagram open yet. Insert a Mermaid flowchart, then choose Edit — or run “Insert visual Mermaid diagram” from the command palette.",
+			});
+			return;
+		}
+
+		this.ui = new DiagramEditorUI(this.app, container, this.model, {
+			saveLabel: "Save to note",
+			persist: (m) => this.onSave?.(m),
+			close: () => this.leaf.detach(),
+			autoSave: this.autoSave,
+			toolbarStyle: this.toolbarStyle,
+			exportFolder: this.exportFolder,
+			snapSize: this.snapSize,
+			defaultShape: this.defaultShape,
+			collapsePropertySections: this.collapsePropertySections,
+			autoResizeCanvas: this.autoResizeCanvas,
+			panelStyle: this.panelStyle,
+			ai: this.ai,
+			getComponentLibrary: this.getComponentLibrary,
+			saveComponentLibrary: this.saveComponentLibrary,
+		});
+		this.ui.build();
+	}
+}

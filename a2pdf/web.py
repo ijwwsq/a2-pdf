@@ -7,14 +7,16 @@
     GET  /login       вход, если он включён
     POST /convert     multipart: file | text | url + поля оформления
     GET  /brands      организации, /fonts — наборы шрифтов, /covers — фоны
+    GET  /builder     конструктор схем mermaid
+    POST /diagram/theme  схема в цветах бренда: тема и перекрашенный исходник
     GET  /healthz     состояние сервиса
 """
 from __future__ import annotations
 
 import asyncio
+import base64
 import concurrent.futures
 import contextlib
-import ipaddress
 import logging
 import os
 import pathlib
@@ -26,15 +28,15 @@ import urllib.parse
 import uuid
 from collections import deque
 
-from fastapi import (Cookie, Depends, FastAPI, File, Form, HTTPException,
+from fastapi import (Body, Cookie, Depends, FastAPI, File, Form, HTTPException,
                      Request, Response, UploadFile)
 from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
                                RedirectResponse)
 from starlette.background import BackgroundTask
 
-from . import auth, brands, core, notion
+from . import auth, brands, core, diagrams, notion
 from .docx_reader import docx_to_blocks
-from .fetch import FetchError, fetch
+from .fetch import FetchError, fetch, get_bytes, public_ip
 
 log = logging.getLogger("a2pdf")
 
@@ -96,8 +98,8 @@ def _rate_ok(client: str) -> bool:
     if len(hits) >= RATE_LIMIT:
         return False
     hits.append(now)
-    if len(_hits) > 5000:  # не копим адреса бесконечно
-        for key in [k for k, v in _hits.items() if not v]:
+    if len(_hits) > 5000:  # не копим адреса бесконечно: старше минуты — не нужны
+        for key in [k for k, v in _hits.items() if not v or now - v[-1] > 60]:
             _hits.pop(key, None)
     return True
 
@@ -116,11 +118,9 @@ def _check_url(raw: str) -> str:
         infos = socket.getaddrinfo(host, None)
     except socket.gaierror:
         raise ValueError("Адрес не найден")
-    for info in infos:
-        ip = ipaddress.ip_address(info[4][0])
-        if (ip.is_private or ip.is_loopback or ip.is_link_local
-                or ip.is_reserved or ip.is_multicast):
-            raise ValueError("Ссылки на внутренние адреса не принимаются")
+    # ранняя проверка ради понятной ошибки; настоящая — при подключении
+    if not all(public_ip(info[4][0]) for info in infos):
+        raise ValueError("Ссылки на внутренние адреса не принимаются")
     return url
 
 
@@ -211,6 +211,16 @@ def logout(request: Request):
     return redirect
 
 
+@app.get("/favicon.ico")
+def favicon() -> FileResponse:
+    """Значок вкладки — фирменный знак основного бренда."""
+    path = core.ASSETS / "logo" / f"{brands.get(None).logo}-color.png"
+    if not path.is_file():
+        raise HTTPException(404)
+    return FileResponse(path, media_type="image/png",
+                        headers={"Cache-Control": "public, max-age=604800"})
+
+
 @app.get("/healthz")
 def healthz() -> JSONResponse:
     return JSONResponse({"status": "ok", "version": app.version,
@@ -225,9 +235,12 @@ def brand_list(user: str = Depends(current_user)) -> JSONResponse:
     """Организации, для которых сервис умеет верстать."""
     return JSONResponse({"brands": [
         {"key": brand.key, "name": brand.name, "site": brand.site,
-         "colors": {"brand": brand.color("brand"),
-                    "accent": brand.color("accent"),
-                    "mark": brand.color("mark")}}
+         "colors": brand.colors, "neutrals": brand.neutrals,
+         "fonts": {"body": brand.fonts.body, "display": brand.fonts.display,
+                   "mono": brand.fonts.mono,
+                   "display_weight": brand.fonts.display_weight},
+         # знак BeCloud со слоганом шире: в шапке его делаем крупнее
+         "logo_scale": round(brand.logo_width_mm / brands.A2DATA.logo_width_mm, 2)}
         for brand in brands.BRANDS.values()], "default": brands.DEFAULT})
 
 
@@ -286,20 +299,86 @@ def fonts(brand: str | None = None) -> FileResponse:
                         headers={"Cache-Control": "public, max-age=604800"})
 
 
-@app.get("/", response_class=HTMLResponse)
-def index(request: Request,
-          session: str | None = Cookie(default=None, alias=auth.COOKIE)):
+def _page(request: Request, session: str | None, name: str):
+    """Страница формы: без входа отправляем на /login."""
     if AUTH.enabled:
         if AUTH.configured and not auth.validate(AUTH, session):
             return RedirectResponse("/login", status_code=303)
         if not AUTH.configured and not auth.is_local(_client(request)):
             raise HTTPException(503,
                                 "Сервис не настроен: не задана учётная запись")
-    page = (STATIC / "index.html").read_text(encoding="utf-8")
+    page = (STATIC / name).read_text(encoding="utf-8")
     if not AUTH.enabled:
         page = page.replace('<form method="post" action="/logout">',
                             '<form method="post" action="/logout" hidden>')
     return HTMLResponse(page)
+
+
+@app.get("/", response_class=HTMLResponse)
+def index(request: Request,
+          session: str | None = Cookie(default=None, alias=auth.COOKIE)):
+    return _page(request, session, "index.html")
+
+
+@app.get("/builder", response_class=HTMLResponse)
+def builder(request: Request,
+            session: str | None = Cookie(default=None, alias=auth.COOKIE)):
+    return _page(request, session, "builder.html")
+
+
+@app.get("/mermaid.js")
+def mermaid_js(user: str = Depends(current_user)) -> FileResponse:
+    """Тот же mermaid, что рисует схемы в документе, — без внешних CDN."""
+    return FileResponse(core.ASSETS / "mermaid.min.js",
+                        media_type="text/javascript",
+                        headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.get("/static/flow/{name}")
+def flow_asset(name: str, user: str = Depends(current_user)) -> FileResponse:
+    """Визуальный редактор схем (сборка frontend/flow)."""
+    media = {".js": "text/javascript", ".css": "text/css"}
+    path = STATIC / "flow" / pathlib.Path(name).name
+    if path.suffix not in media or not path.is_file():
+        raise HTTPException(404, "Нет такого файла")
+    return FileResponse(path, media_type=media[path.suffix])
+
+
+@app.get("/mermaid-fix.js")
+def mermaid_fix(user: str = Depends(current_user)) -> FileResponse:
+    return FileResponse(diagrams.FIX_JS, media_type="text/javascript")
+
+
+@app.get("/diagram/templates")
+def diagram_templates(user: str = Depends(current_user)) -> JSONResponse:
+    """Заготовки конструктора: типы схем, стартовый код и вставки."""
+    return JSONResponse({"templates": [
+        {"key": key, "group": t["group"], "title": t["title"],
+         "source": t["source"],
+         "snippets": [{"label": label, "text": text}
+                      for label, text in t["snippets"]]}
+        for key, t in diagrams.TEMPLATES.items()]})
+
+
+@app.post("/diagram/theme")
+def diagram_theme(payload: dict = Body(...),
+                  user: str = Depends(current_user)) -> JSONResponse:
+    """Всё, чтобы браузер нарисовал схему так же, как документ: переменные
+    темы, правила формы узлов, подложку, токены бренда и исходник,
+    в котором свои classDef перекрашены палитрой шаблона."""
+    brand = brands.get(payload.get("brand"))
+    style = core.scheme_style(payload.get("scheme"), brand)
+    source = str(payload.get("source") or "")
+    if len(source) > 200_000:
+        raise HTTPException(413, "Слишком большая схема")
+    return JSONResponse({
+        "source": diagrams.theme_diagram(source, brand, style),
+        "config": diagrams.mermaid_config(brand, None, style),
+        "css": diagrams.scheme_css(style),
+        "backdrop": style["backdrop"], "tokens": brands.tokens(brand),
+        "palette": style["palette"], "series": style["series"],
+        "dark": style["dark"],
+        "scheme": style["key"], "brand": brand.key})
 
 
 def _text(value: str) -> str:
@@ -331,8 +410,46 @@ def _overrides(**fields: str | None) -> dict:
     return out
 
 
+IMAGE_LIMIT = 8 * 1024 * 1024
+
+
+def _image_data(src: str) -> str:
+    """Картинка из документа пользователя — только data: или публичная ссылка,
+    которую скачиваем сами. Локальные пути и внутренние адреса не трогаем:
+    иначе текст документа читал бы файлы сервера и ходил во внутреннюю сеть."""
+    if src.startswith("data:image/"):
+        return src
+    if not src.startswith(("http://", "https://")):
+        return ""
+    try:
+        data, kind, _ = get_bytes(src, timeout=20, limit=IMAGE_LIMIT,
+                                  accept="image/*")
+    except FetchError:
+        return ""
+    if not kind.startswith("image/"):
+        return ""
+    return f"data:{kind};base64," + base64.b64encode(data).decode("ascii")
+
+
+def _safe_media(blocks: list[tuple], front: dict, overrides: dict) -> list[tuple]:
+    """Картинки и фото обложки из пользовательского текста — через _image_data.
+    Фото, выбранное в форме (встроенный фон или загрузка), остаётся как есть."""
+    if front.get("photo") and front.get("photo") != overrides.get("photo"):
+        front["photo"] = _image_data(str(front["photo"]).strip())
+    sources = [b[1] for b in blocks if b[0] == "image"]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        resolved = dict(zip(sources, pool.map(_image_data, sources)))
+    return [("image", resolved[b[1]]) if b[0] == "image" else b
+            for b in blocks if b[0] != "image" or resolved[b[1]]]
+
+
 def _blocks_of(source: dict, overrides: dict) -> tuple[list[tuple], dict, str]:
     """Блоки, настройки обложки и имя файла для любого источника."""
+    blocks, front, stem = _read_blocks(source, overrides)
+    return _safe_media(blocks, front, overrides), front, stem
+
+
+def _read_blocks(source: dict, overrides: dict) -> tuple[list[tuple], dict, str]:
     kind = source["kind"]
     if kind == "file" and source["suffix"] == ".docx":
         blocks, front = docx_to_blocks(source["data"])
@@ -403,7 +520,7 @@ async def _read_source(file: UploadFile | None, text: str | None,
         suffix = pathlib.Path(file.filename).suffix.lower()
         if suffix not in ALLOWED:
             raise HTTPException(415, f"Поддерживаются {', '.join(sorted(ALLOWED))}")
-        data = await file.read()
+        data = await file.read(MAX_BYTES + 1)   # больше лимита в память не берём
         if not data:
             raise HTTPException(400, "Пустой файл")
         if len(data) > MAX_BYTES:
@@ -428,7 +545,7 @@ async def _read_source(file: UploadFile | None, text: str | None,
 
 def _look(fields: dict, style: str | None, brand: str | None, font: str | None,
           scheme: str | None, background: str | None, cover: str | None,
-          numbered: str | None) -> dict:
+          numbered: str | None, toc: str | None = None) -> dict:
     """Настройки оформления. Всё незнакомое отбрасываем: подпись обложки
     приходит от пользователя, а название бренда или схемы — нет."""
     overrides = _overrides(**fields)
@@ -443,6 +560,8 @@ def _look(fields: dict, style: str | None, brand: str | None, font: str | None,
         overrides["cover"] = "false"
     if numbered in ("0", "false", "off"):
         overrides["numbered"] = "false"
+    if toc in ("0", "false", "off", "1", "true", "on"):
+        overrides["toc"] = "false" if toc in ("0", "false", "off") else "true"
     if background:
         builtin = COVERS / f"{pathlib.Path(background).stem}.jpg"
         if builtin.is_file():
@@ -457,7 +576,7 @@ async def _save_photo(photo: UploadFile | None) -> pathlib.Path | None:
     suffix = pathlib.Path(photo.filename).suffix.lower()
     if suffix not in PHOTO_TYPES:
         raise HTTPException(415, "Фото должно быть jpg, png или webp")
-    blob = await photo.read()
+    blob = await photo.read(MAX_BYTES + 1)
     if len(blob) > MAX_BYTES:
         raise HTTPException(413, "Фото слишком большое")
     path = OUT_DIR / f"{uuid.uuid4().hex}{suffix}"
@@ -480,6 +599,7 @@ async def convert(
     header: str | None = Form(None),
     footer: str | None = Form(None),
     confidential: str | None = Form(None),
+    watermark: str | None = Form(None),
     meta: str | None = Form(None),
     style: str | None = Form(None),
     brand: str | None = Form(None),
@@ -489,6 +609,7 @@ async def convert(
     background: str | None = Form(None),
     cover: str | None = Form(None),
     numbered: str | None = Form(None),
+    toc: str | None = Form(None),
 ):
     fmt = _format_of(format)
     if not _rate_ok(_client(request)):
@@ -498,8 +619,8 @@ async def convert(
     overrides = _look(
         {"title": title, "subtitle": subtitle, "kicker": kicker, "index": index,
          "header": header, "footer": footer, "confidential": confidential,
-         "meta": meta},
-        style, brand, font, scheme, background, cover, numbered)
+         "watermark": watermark, "meta": meta},
+        style, brand, font, scheme, background, cover, numbered, toc)
 
     photo_path = await _save_photo(photo)
     if photo_path:

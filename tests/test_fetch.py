@@ -55,7 +55,7 @@ def test_http_error_becomes_readable_message(monkeypatch):
     def boom(req, timeout=None):
         raise urllib.error.HTTPError(req.full_url, 404, "Not Found", {}, None)
 
-    monkeypatch.setattr(fetch_module.urllib.request, "urlopen", boom)
+    monkeypatch.setattr(fetch_module.OPENER, "open", boom)
     with pytest.raises(FetchError) as exc:
         fetch("https://example.com/net")
     assert "404" in str(exc.value)
@@ -65,7 +65,7 @@ def test_broken_connection_becomes_readable_message(monkeypatch):
     def boom(req, timeout=None):
         raise OSError("соединение разорвано")
 
-    monkeypatch.setattr(fetch_module.urllib.request, "urlopen", boom)
+    monkeypatch.setattr(fetch_module.OPENER, "open", boom)
     with pytest.raises(FetchError) as exc:
         fetch("https://example.com/net")
     assert "Не удалось открыть ссылку" in str(exc.value)

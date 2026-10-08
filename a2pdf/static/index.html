@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>A2DATA · PDF</title>
-<link rel="stylesheet" href="/fonts.css">
+<link rel="stylesheet" id="fontcss" href="/fonts.css">
 <style>
 /* Палитра, типографика, радиусы и тени — по брендбуку A2DATA */
 :root{
@@ -14,9 +14,13 @@
   --n0:#FFFFFF; --n50:#F7F8FA; --n100:#EFF1F4; --n200:#E1E4EA;
   --n400:#9CA3AF; --n500:#6B7280; --n700:#374151; --n800:#212934; --n900:#111722;
   --r-md:8px; --r-lg:12px; --r-xl:16px;
-  --sh-sm:0 1px 2px rgba(11,38,96,.06);
-  --sh-md:0 4px 12px rgba(11,38,96,.08);
-  --sh-lg:0 12px 28px rgba(11,38,96,.12);
+  /* тени и подложки — оттенки основного цвета бренда */
+  --sh-sm:0 1px 2px color-mix(in srgb,var(--navy) 6%,transparent);
+  --sh-md:0 4px 12px color-mix(in srgb,var(--navy) 8%,transparent);
+  --sh-lg:0 12px 28px color-mix(in srgb,var(--navy) 12%,transparent);
+  --veil:linear-gradient(155deg,color-mix(in srgb,var(--navy) 78%,transparent),
+         color-mix(in srgb,var(--navy-900) 95%,transparent));
+  --display:var(--font); --display-weight:700;
   --font:'Inter','Helvetica Neue',Arial,sans-serif;
   --mono:'JetBrains Mono','SF Mono',Consolas,monospace;
 }
@@ -30,7 +34,13 @@ svg{stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;
 header{background:var(--navy);color:#fff;padding:16px 28px;display:flex;
        align-items:center;justify-content:space-between;
        border-bottom:3px solid var(--amber);flex:none}
-.wordmark{height:16px;width:auto;display:block}
+.wordmark{height:calc(16px * var(--logo-scale,1));width:auto;display:block}
+.brandnav{display:flex;align-items:center;gap:28px}
+.brandnav nav{display:flex;gap:4px}
+.brandnav nav a{color:rgba(255,255,255,.7);text-decoration:none;font-weight:600;
+  font-size:13px;padding:6px 12px;border-radius:var(--r-md)}
+.brandnav nav a:hover{color:#fff}
+.brandnav nav a.on{color:#fff;background:rgba(255,255,255,.12)}
 .head-right{display:flex;align-items:center;gap:14px}
 .orgs{display:flex;gap:6px}
 .orgs button{display:flex;align-items:center;gap:7px;border:1px solid var(--n200);
@@ -129,7 +139,7 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--blue);
 .thumb .ph{position:absolute;inset:0;background-size:cover;background-position:center;
            filter:grayscale(1) brightness(1.35)}
 .thumb .tint{position:absolute;inset:0;
-             background:linear-gradient(155deg,rgba(11,38,96,.78),rgba(6,23,59,.95))}
+             background:var(--veil)}
 .thumb i,.thumb u{position:absolute;display:block;border-radius:1px}
 .thumb i{left:8px;top:8px;width:12px;height:2px;background:var(--amber)}
 .thumb u{left:8px;background:rgba(255,255,255,.9)}
@@ -173,7 +183,7 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--blue);
 .bgs .mini .ph{position:absolute;inset:0;background-size:cover;background-position:center;
                filter:grayscale(1) brightness(1.35)}
 .bgs .mini .tint{position:absolute;inset:0;
-  background:linear-gradient(155deg,rgba(11,38,96,.75),rgba(6,23,59,.95))}
+  background:var(--veil)}
 .bgs em{display:block;font-style:normal;font-size:10.5px;color:var(--n500);
         padding:4px 2px;text-align:center}
 .bgs button.on em{color:var(--navy);font-weight:600}
@@ -246,7 +256,10 @@ footer{padding:14px 28px;border-top:1px solid var(--n200);background:var(--n0);
 </head>
 <body>
 <header>
-  <img class="wordmark" id="logo" src="/logo/a2data-white" alt="">
+  <div class="brandnav">
+    <img class="wordmark" id="logo" src="/logo/a2data-white" alt="">
+    <nav><a href="/" class="on">Документы</a><a href="/builder">Конструктор схем</a></nav>
+  </div>
   <div class="head-right">
     <form method="post" action="/logout"><button class="exit" type="submit">Выйти</button></form>
   </div>
@@ -323,8 +336,10 @@ footer{padding:14px 28px;border-top:1px solid var(--n200);background:var(--n0);
               <input type="text" id="index" placeholder="01"></div>
             <div class="f wide"><label for="subtitle">Подзаголовок</label>
               <input type="text" id="subtitle"></div>
-            <div class="f wide"><label for="confidential">Плашка</label>
+            <div class="f"><label for="confidential">Плашка</label>
               <input type="text" id="confidential" placeholder="Конфиденциально"></div>
+            <div class="f"><label for="watermark">Водяной знак</label>
+              <input type="text" id="watermark" placeholder="ЧЕРНОВИК"></div>
           </div>
         </div>
 
@@ -365,6 +380,8 @@ footer{padding:14px 28px;border-top:1px solid var(--n200);background:var(--n0);
           <div class="checks">
             <label><input type="checkbox" id="cover" checked> Титульная страница</label>
             <label><input type="checkbox" id="numbered" checked> Нумеровать разделы</label>
+            <label title="По умолчанию — когда разделов три и больше">
+              <input type="checkbox" id="toc" checked> Оглавление</label>
           </div>
         </div>
       </div>
@@ -409,14 +426,32 @@ let tab = 'pane-file';
 let format = 'pdf';
 let org = localStorage.getItem('a2pdf-brand') || 'a2data';
 let textKind = 'md';
+let handoffScheme = '';   // шаблон схемы, выбранный в конструкторе
 let ORGS = [];
+
+// роли брендбука → переменные страницы: перекрашивается вся форма, не только шапка
+const ROLES = {navy: 'brand', 'navy-900': 'brand_dark', 'navy-50': 'brand_50',
+  'navy-100': 'brand_100', blue: 'accent', 'blue-700': 'accent_dark',
+  'blue-50': 'accent_50', 'blue-100': 'accent_100', amber: 'mark',
+  'amber-700': 'mark_dark', 'amber-50': 'mark_50'};
 
 function paint(brand) {
   const root = document.documentElement.style;
-  root.setProperty('--navy', brand.colors.brand);
-  root.setProperty('--blue', brand.colors.accent);
-  root.setProperty('--blue-700', brand.colors.accent);
-  root.setProperty('--amber', brand.colors.mark);
+  for (const [name, role] of Object.entries(ROLES)) {
+    if (brand.colors[role]) root.setProperty('--' + name, brand.colors[role]);
+  }
+  for (const [name, value] of Object.entries(brand.neutrals || {})) {
+    root.setProperty('--' + name, value);
+  }
+  const f = brand.fonts || {};
+  if (f.body) {
+    root.setProperty('--font', `'${f.body}','Segoe UI',Arial,sans-serif`);
+    root.setProperty('--display', `'${f.display}','${f.body}',sans-serif`);
+    root.setProperty('--mono', `'${f.mono}',Consolas,monospace`);
+    root.setProperty('--display-weight', f.display_weight || 700);
+  }
+  root.setProperty('--logo-scale', brand.logo_scale || 1);
+  $('fontcss').href = '/fonts.css?brand=' + encodeURIComponent(brand.key);
   $('logo').src = `/logo/${brand.key}-white`;
   document.title = brand.name + ' · Документы';
   // миниатюры пресетов набраны цветами организации, поэтому берём их заново
@@ -724,17 +759,19 @@ $('form').addEventListener('submit', async (ev) => {
     body.append('text', wrapped);
   }
   else body.append('url', $('url').value.trim());
-  ['title','subtitle','kicker','index','header','footer','confidential','meta']
+  ['title','subtitle','kicker','index','header','footer','confidential','watermark','meta']
     .forEach(k => { const v = $(k).value.trim(); if (v) body.append(k, v); });
   body.append('style', $('style').value);
   body.append('format', format);
   body.append('brand', org);
   if (schemaMode()) body.append('scheme', scheme);
+  else if (tab === 'pane-text' && handoffScheme) body.append('scheme', handoffScheme);
   if ($('fontset') && $('fontset').value) body.append('font', $('fontset').value);
   if ($('background').value) body.append('background', $('background').value);
   if ($('photo').files[0]) body.append('photo', $('photo').files[0]);
   if (!$('cover').checked) body.append('cover', '0');
   if (!$('numbered').checked) body.append('numbered', '0');
+  if (!$('toc').checked) body.append('toc', '0');
 
   $('submit').disabled = true;
   status.className = 'status';
@@ -797,6 +834,21 @@ $('form').addEventListener('submit', async (ev) => {
 
 drawTemplates();
 refresh();
+
+// схема из конструктора: дописываем её в текст документа
+try {
+  const handoff = JSON.parse(localStorage.getItem('a2pdf-handoff') || 'null');
+  localStorage.removeItem('a2pdf-handoff');
+  if (handoff && handoff.text) {
+    switchTab('pane-text');
+    const box = $('mdtext');
+    box.value = (box.value.trim() ? box.value.trimEnd() + '\n\n' : '') + handoff.text + '\n';
+    handoffScheme = handoff.scheme || '';
+    refresh();
+    status.textContent = 'Схема из конструктора добавлена в текст';
+    status.className = 'status ok';
+  }
+} catch (e) {}
 </script>
 </body>
 </html>
